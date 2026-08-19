@@ -20,6 +20,13 @@
 - **`ClockPort` is injected wherever time is read.** `Date.now()` never appears inside `domain/` or `application/`.
 - **No DI framework.** Wire by hand in the composition root.
 - Dependencies point inward. `domain/` imports nothing from `application/`, `infrastructure/`, or `api/`.
+- **Every safety-critical invariant must be proven by mutation.** Before a test
+  covering one of these counts as passing, break the implementation
+  deliberately, watch the test fail, then revert and watch it pass. A test that
+  has never failed has told you nothing. The invariants: cooldown ordering
+  (claim before call), claim atomicity, the pessimistic-2x-narrowed-on-evidence
+  window, audit-on-rejection, and no-retry-on-timeout. Record the mutation and
+  the resulting failure in the task report.
 
 ## Shared Type Vocabulary
 
@@ -921,9 +928,24 @@ export class TriggerGateUseCase implements TriggerGate {
 }
 ```
 
-- [ ] **Step 5: Run tests** → all 9 PASS. Confirm the timeout test genuinely fails if you temporarily change `FakeGuard` to write a 1x window; then revert.
+- [ ] **Step 5: Run tests** → all 9 PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Prove the safety tests by mutation**
+
+A test that has never failed has told you nothing. Run all three mutations,
+confirm the named tests fail, revert after each, and record the observed
+failures in your report.
+
+| Mutation | Must fail |
+|---|---|
+| Move the `guard.tryClaim` call to *after* `gate.pulse()` | `rejects a second tap inside the cooldown` |
+| In `FakeGuard.tryClaim`, write `now + p.cooldownMs` (1x) instead of 2x | `rejects an immediate retry after a TIMEOUT` |
+| Delete the `claim.kind === 'replayed'` branch | `replays an identical key without a second pulse` |
+
+If any mutation leaves the suite green, the test is not testing what it claims
+— fix the test before continuing.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/src/application/trigger-gate.ts backend/src/application/trigger-gate.test.ts backend/test/fakes.ts
@@ -1058,7 +1080,16 @@ Add `import type { ErrorCode } from '@gate/shared';` at the top.
 
 - [ ] **Step 4: Run tests** → all 5 PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Prove the audit-on-rejection invariant by mutation**
+
+| Mutation | Must fail |
+|---|---|
+| Move the `audit.append` out of `finally` into the `try`, after the return | `audits an unexpected throw and rethrows it` |
+| Guard the append with `if (result.ok)` | `audits an access denial` and `audits an unknown user` |
+
+Revert both. Record the observed failures in your report.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/src/application/audited-trigger.ts backend/src/application/audited-trigger.test.ts
@@ -1566,7 +1597,17 @@ Success is HTTP 200 and nothing else — do not parse the body for confirmation.
 
 - [ ] **Step 4: Run tests** → all 6 PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Prove the no-retry invariant by mutation**
+
+| Mutation | Must fail |
+|---|---|
+| Wrap the `fetch` in a 2-attempt retry loop on `AbortError` | `returns timeout WITHOUT retrying` (`requests` becomes 2) |
+| Return `{ outcome: 'success' }` when the body parses but the status is 400 | `maps DEVICE_OFFLINE` |
+
+Revert both. Record the observed failures in your report. The retry mutation is
+the one that matters: a retry here can stop a moving gate.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/src/infrastructure/shelly

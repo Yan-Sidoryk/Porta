@@ -1465,7 +1465,19 @@ git commit -m "feat: atomic sqlite command guard, pessimistic until confirmed"
 
 **Interfaces:**
 - Consumes: `GateCommandPort`, `GateStatePort`, `PulseResult`, `GateState`, `ClockPort`.
-- Produces: `ShellyCloudGateCommandAdapter`, `UnknownPositionStateAdapter`, both constructed with `(config: ShellyConfig, clock: ClockPort)` where `ShellyConfig = { host: string; authKey: string; deviceId: string; timeoutMs: number }`.
+- Produces: `ShellyCloudGateCommandAdapter`, `UnknownPositionStateAdapter`, both constructed with `(config: ShellyConfig, clock: ClockPort)` where:
+
+```ts
+export interface ShellyConfig {
+  host: string;
+  authKey: string;
+  deviceId: string;
+  timeoutMs: number;
+  /** Test-only: build http:// instead of https://, so the stub server can be
+   *  reached on 127.0.0.1. Never set in production config. */
+  insecure?: boolean;
+}
+```
 
 - [ ] **Step 1: Write the failing integration test**
 
@@ -1535,13 +1547,28 @@ describe('ShellyCloudGateCommandAdapter', () => {
     expect((await adapter.pulse()).outcome).toBe('device-offline');
   });
 
-  it('maps DEVICE_NOT_FOUND and BAD_REQUEST', async () => {
-    const { host } = await start((body) => ({
-      status: 400,
-      json: { error: (body as { id: string }).id === 'testdevice' ? 'DEVICE_NOT_FOUND' : 'BAD_REQUEST', data: { messages: [] } },
+  it('maps DEVICE_NOT_FOUND', async () => {
+    const { host } = await start(() => ({
+      status: 404, json: { error: 'DEVICE_NOT_FOUND', data: { messages: [] } },
     }));
     const adapter = new ShellyCloudGateCommandAdapter(config(host), new FakeClock());
     expect((await adapter.pulse()).outcome).toBe('device-not-found');
+  });
+
+  it('maps BAD_REQUEST', async () => {
+    const { host } = await start(() => ({
+      status: 400, json: { error: 'BAD_REQUEST', data: { messages: [] } },
+    }));
+    const adapter = new ShellyCloudGateCommandAdapter(config(host), new FakeClock());
+    expect((await adapter.pulse()).outcome).toBe('bad-request');
+  });
+
+  it('maps DEVICE_FAILED_COMMAND', async () => {
+    const { host } = await start(() => ({
+      status: 400, json: { error: 'DEVICE_FAILED_COMMAND', data: { messages: [] } },
+    }));
+    const adapter = new ShellyCloudGateCommandAdapter(config(host), new FakeClock());
+    expect((await adapter.pulse()).outcome).toBe('device-failed');
   });
 
   it('returns timeout WITHOUT retrying', async () => {
@@ -1595,7 +1622,7 @@ Success is HTTP 200 and nothing else — do not parse the body for confirmation.
 
 `state-adapter.ts` POSTs `{ ids: [deviceId] }` to `/v2/devices/api/get` and returns `{ position: 'unknown', reachable: online === 1, checkedAt: clock.now() }`. **`position` is hardcoded `'unknown'`** — there is no sensor, and inferring it from command history would be a lie. A future reed-switch adapter replaces this class wholesale.
 
-- [ ] **Step 4: Run tests** → all 6 PASS.
+- [ ] **Step 4: Run tests** → all 8 PASS.
 
 - [ ] **Step 5: Prove the no-retry invariant by mutation**
 

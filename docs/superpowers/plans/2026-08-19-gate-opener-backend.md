@@ -1826,15 +1826,34 @@ const STATUS: Record<ErrorCode, number> = {
 
 `USER_UNKNOWN` maps to 403 with the same body as `ACCESS_DENIED` — the client must not learn which. Configure the Fastify logger with a redaction serializer so `authKey`, `password`, and `token` never reach the output.
 
-- [ ] **Step 7: Implement the create-user CLI**
+- [ ] **Step 7: Give `@gate/shared` a build step**
+
+Deferred here from Task 1 deliberately. Until now every consumer of
+`@gate/shared` has been `tsc` or Vitest, both of which resolve raw `.ts`
+source. `server.ts` is the first thing that runs under plain `node`, which
+cannot. Add to `shared/package.json`:
+
+```json
+"main": "./dist/api.js",
+"types": "./dist/api.d.ts",
+"exports": { ".": { "types": "./dist/api.d.ts", "default": "./dist/api.js" } },
+"scripts": { "build": "tsc", "prepare": "tsc" }
+```
+
+Set `outDir: "./dist"` in `shared/tsconfig.json` and add a root
+`"build": "npm run build --workspaces --if-present"`. Run the full suite
+afterwards — if any import breaks, it breaks here where it is cheap, not in
+production.
+
+- [ ] **Step 8: Implement the create-user CLI**
 
 `backend/scripts/create-user.ts` parses `--email`, `--password`, `--role` with `node:util`'s `parseArgs` — no CLI framework. It opens the database, hashes with the same argon2id helper, inserts, and prints the new id. This is the only way an account is created; there is no signup route.
 
-- [ ] **Step 8: Run the full suite**
+- [ ] **Step 9: Run the full suite**
 
 Run: `npm test` at the root. Every test from Tasks 1–11 must pass.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add backend/src/config.ts backend/src/composition-root.ts backend/src/server.ts backend/src/api backend/scripts

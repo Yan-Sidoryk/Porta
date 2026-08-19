@@ -1,0 +1,9 @@
+{
+  "name": "gate-opener",
+  "private": true,
+  "workspaces": ["shared", "backend"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

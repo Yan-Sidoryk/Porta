@@ -1,0 +1,21 @@
+{
+  "name": "@gate/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "types": "./src/api.ts",
+  "exports": {
+    ".": "./src/api.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

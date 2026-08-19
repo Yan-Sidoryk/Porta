@@ -124,10 +124,16 @@ would mean pruning old rows silently disables the cooldown.
    - `granted` → continue, holding `claimId`.
 4. `GateCommandPort.pulse()`.
 5. `guard.release(claimId, outcome)`.
-6. Write an audit entry — user, timestamp, outcome, error code — on success,
-   failure, and denial alike. Failed and denied attempts matter more than
-   successful ones.
-7. Return a typed result. Never throw raw adapter errors across the layer boundary.
+6. Return a typed result. Never throw raw adapter errors across the layer boundary.
+
+Auditing is **not** a step in this list. Steps 1 and 2 reject and return early, so
+an audit write positioned at the end would never execute for an unknown user or a
+denied policy check — exactly the attempts that matter most. Instead, auditing
+**wraps** the use case: `TriggerGateUseCase` is composed inside an auditing
+decorator (equivalently, a `finally` around the whole body) that records every
+invocation and its outcome, including early rejections and unexpected throws.
+Every path in and out of the use case is logged by construction, not by
+remembering to call the logger on each branch.
 
 ### 4.1 Why the claim precedes the call
 
@@ -147,28 +153,40 @@ same key both proceed.
 
 A claim holds the cooldown regardless of how the attempt resolves.
 
-| Outcome | Cooldown held |
-|---|---|
-| `success` | `GATE_COOLDOWN_MS` |
-| `timeout-ambiguous` | `GATE_COOLDOWN_MS * 2` |
-| `device-offline` and other confirmed failures | `GATE_COOLDOWN_MS` |
+**The window is pessimistic at claim time and narrowed only by evidence.**
+`tryClaim` writes `cooling_until = now + GATE_COOLDOWN_MS * 2`. `release`
+*narrows* it to `1×` when the outcome is confirmed, and leaves it alone when it
+is not.
+
+| Outcome | Cooldown held | Written by |
+|---|---|---|
+| `success` | `GATE_COOLDOWN_MS` | narrowed by `release` |
+| `device-offline` and other confirmed failures | `GATE_COOLDOWN_MS` | narrowed by `release` |
+| `timeout-ambiguous` | `GATE_COOLDOWN_MS * 2` | claim-time default, left untouched |
+| abandoned — never released | `GATE_COOLDOWN_MS * 2` | claim-time default, never touched |
+
+The ordering matters. Writing `1×` at claim time and extending on timeout would
+give an abandoned claim — where the process died and we do not even know whether
+the request left the machine — a *weaker* guard than a timeout, despite carrying
+strictly less information. Defaulting to `2×` and narrowing on evidence means
+every unknown resolves conservatively.
 
 **Timeout.** A timed-out request may well have delivered the pulse. The system
-has *less* information than usual about what just happened, so it waits longer:
-`GATE_COOLDOWN_MS * 2`. `release` extends the claim's `cooling_until` when the
-outcome is a timeout.
+has less information than usual about what just happened, so the claim-time `2×`
+window stands. `release` records the outcome without touching `cooling_until`.
 
 **Confirmed failure.** A `DEVICE_OFFLINE` response means no pulse was delivered,
-so in principle an immediate retry is harmless. The cooldown is held anyway: the
+so in principle an immediate retry is harmless. A cooldown is still held — the
 cost is five seconds, the cost of being wrong is a gate stopped mid-travel, and
-holding it also stops a retry loop hammering an offline device.
+holding it also stops a retry loop hammering an offline device — but it narrows
+to `1×`, because the outcome is known.
 
 **Abandoned claims.** If the process dies between `tryClaim` and `release`, the
-claim keeps its outcome column null forever. `cooling_until` was written at claim
-time, so the cooldown still expires on schedule and the gate is not bricked. The
-only lasting effect is that a replay of that exact key within the idempotency
-window reports `'pending'`. No reaper process; the rows age out of relevance on
-their own.
+outcome column stays null and `cooling_until` keeps its `2×` claim-time value.
+The cooldown expires on schedule and the gate is never bricked; the state that
+knows least simply waits longest. The only lasting effect is that a replay of
+that exact key within the idempotency window reports `'pending'`. No reaper
+process — the rows age out of relevance on their own.
 
 ## 5. Access policy
 
@@ -208,6 +226,14 @@ immediately rather than waiting out a stateless JWT.
 Indexes in the initial migration: `audit_events(created_at)`,
 `audit_events(idempotency_key)`, `command_claims(claimed_at)`,
 `command_claims(idempotency_key)`.
+
+**Growth.** `command_claims` gains one row per gate attempt and is never pruned.
+At household volume — a few dozen rows a day, worst case — that is a few hundred
+kilobytes a year against an indexed local SQLite file. Negligible; no reaper
+process, no retention policy. If this ever ran at a volume where it mattered, a
+`DELETE FROM command_claims WHERE claimed_at < ?` on a timer is the whole fix,
+and it is safe because a claim older than the idempotency window has no
+remaining effect on behaviour.
 
 ## 7. API surface
 
@@ -299,15 +325,36 @@ One screen.
   ignorance.
 - The button is disabled for the cooldown period after a tap, with a visible
   countdown. This is the primary defence against the stop-mid-travel failure
-  mode.
-- Distinct plain-language messages for: no network, backend unreachable, session
-  expired, access denied, gate offline, cooling down, attempt in progress.
+  mode. **The countdown renders the server-provided `retryAfterMs`** — never a
+  hardcoded 5s. A doubled window after an ambiguous timeout must be visible to
+  the user as a longer wait; a client that assumes 5s would re-enable the button
+  while the server is still rejecting.
+- `ATTEMPT_IN_PROGRESS` is **not** an error state. It renders as a continuation
+  of `sending` — the first attempt is still running, and the honest thing to show
+  is that the app is still working, not that something went wrong.
+- Distinct plain-language messages for the genuine errors: no network, backend
+  unreachable, session expired, access denied, gate offline, cooling down.
 - Biometric lock on app open, defaulting to on.
 - Recent-activity list from the audit log.
 - Ship an icon and splash screen.
 
-Visual direction is an open question — see §16. It must be settled before
-milestone 6, not decided implicitly while building.
+### 11.1 Visual direction
+
+The reference is a **key fob or an e-stop panel, not a consumer smart-home app**.
+This is a control surface for heavy machinery that happens to live on a phone.
+
+- **Dark, forced.** The app does not follow the system theme. One appearance,
+  always, so the screen is never a surprise in the dark.
+- **High contrast, heavy type, no decoration.** Optimised for glanceability from
+  a car at night, which is the real usage context.
+- **The button sits low and centred**, within thumb reach one-handed.
+- **State is never encoded in colour alone.** Text and shape carry it too. The
+  commonest state is "unknown", which has no intuitive colour — and a
+  red/green vocabulary would imply a position the system does not have.
+- **No gate iconography implying a position.** An open-gate or closed-gate glyph
+  would be wrong roughly half the time.
+- **The cooldown is a ring on the button itself**, not a toast. The countdown
+  belongs where the tap happens.
 
 ## 12. Testing
 
@@ -325,7 +372,13 @@ Required cases:
 - `DEVICE_OFFLINE` propagation.
 - Adapter timeout does not trigger a retry.
 - **A timed-out pulse followed by an immediate second attempt is rejected with
-  `GATE_COOLING_DOWN`.**
+  `GATE_COOLING_DOWN`**, and `retryAfterMs` reflects the `2×` window.
+- **A claim that is never released holds the `2×` window**, not `1×` — the
+  abandoned-process path is at least as conservative as the timeout path.
+- **A confirmed outcome narrows the window to `1×`** — `release` on success and
+  on `DEVICE_OFFLINE`.
+- **Denied and unknown-user attempts are written to the audit log**, proving the
+  auditing wrapper covers early rejections rather than only the success path.
 
 One integration test against a stubbed Shelly HTTP server asserting the exact
 request shape, including `toggle_after: 1`.
@@ -367,21 +420,28 @@ before the next begins. `PROGRESS.md` is updated at each one.
 
 ## 15. Assumptions
 
-1. The Shelly relay is already configured with `toggle_after` behaviour
-   compatible with a 1s pulse on the PP input.
+1. **A 1s pulse is long enough for the R70's PP input to register.**
+   `toggle_after` is a request parameter, not device configuration, so nothing
+   needs pre-configuring on the Shelly — but the pulse duration itself is a
+   physical-world assumption. Confirm on the first physical test; if the board
+   misses it, the value is a one-line change in the adapter.
 2. `SHELLY_HOST` is the correct regional Shelly Cloud endpoint for this account.
 3. The backend runs as a single instance. `InMemoryRateLimiter` and
    `SqliteCommandGuard` are correct under that assumption and are documented as
    the seams to replace if that changes.
-4. The credentials originally pasted into `SPEC.md` are treated as compromised
-   and should be rotated; they now live only in a gitignored `.env`.
+4. Credentials were never committed. They were placed in a gitignored `.env`
+   before the repository's first commit, and the placeholders in `SPEC.md` are
+   what is tracked. Nothing needs rotating.
 
-## 16. Open questions
+## 16. Resolved decisions
 
-1. **Visual direction for the app.** `SPEC.md` specifies behaviour and states but
-   no aesthetic. Needed before milestone 6. Default if unanswered: a dark,
-   high-contrast utility screen — one oversized button, heavy type, no
-   decoration. Optimised for glanceability in a car at night, which is the actual
-   usage context.
-2. **`ATTEMPT_IN_PROGRESS` as a distinct response**, versus folding the pending
-   replay case into `GATE_COOLING_DOWN`. Design assumes distinct.
+Both questions raised during design review are settled and folded into the
+sections above; recorded here so the reasoning is not lost.
+
+1. **Visual direction** — resolved. See §11.1. Key fob / e-stop panel, forced
+   dark, no colour-only state, no positional iconography.
+2. **`ATTEMPT_IN_PROGRESS` stays a distinct response**, rather than folding the
+   pending replay into `GATE_COOLING_DOWN`. They mean different things: cooling
+   down is "your command landed, wait"; in-progress is "your command is still
+   being delivered". The app renders it as continued `sending`, not as an error
+   (§11).

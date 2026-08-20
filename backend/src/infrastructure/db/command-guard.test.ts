@@ -154,6 +154,95 @@ describe('SqliteCommandGuard (sqlite-specific)', () => {
     expect(again.retryAfterMs).toBe(bumped - clock.now().getTime());
   });
 
+  describe('release is once-only', () => {
+    // Every assertion here reads cooling_until straight out of the row. A
+    // weaker check -- "a later tryClaim still cools down" -- would pass even
+    // if the window had silently halved, which is the bug being guarded.
+    const coolingUntil = (db: Database.Database): number => {
+      const row = db
+        .prepare<[], { cooling_until: number }>('SELECT cooling_until FROM command_claims')
+        .get();
+      if (!row) throw new Error('expected a persisted claim row');
+      return row.cooling_until;
+    };
+
+    const grantOne = async (db: Database.Database, clock: FakeClock): Promise<string> => {
+      const first = await new SqliteCommandGuard(db, clock).tryClaim(claimParams('key-a'));
+      if (first.kind !== 'granted') throw new Error('expected granted');
+      return first.claimId;
+    };
+
+    it('does not narrow the window twice on a repeated confirmed release', async () => {
+      const db = open(onDiskPath());
+      const clock = new FakeClock();
+      const guard = new SqliteCommandGuard(db, clock);
+      const claimId = await grantOne(db, clock);
+      const claimedAt = clock.now().getTime();
+
+      await guard.release(claimId, 'success');
+      const afterFirst = coolingUntil(db);
+      expect(afterFirst).toBe(claimedAt + COOLDOWN_MS);
+
+      await guard.release(claimId, 'success');
+      expect(coolingUntil(db)).toBe(afterFirst);
+    });
+
+    it('leaves the 2x window alone on a repeated timeout release', async () => {
+      const db = open(onDiskPath());
+      const clock = new FakeClock();
+      const guard = new SqliteCommandGuard(db, clock);
+      const claimId = await grantOne(db, clock);
+      const unconfirmed = clock.now().getTime() + COOLDOWN_MS * UNCONFIRMED_COOLDOWN_MULTIPLIER;
+
+      await guard.release(claimId, 'timeout');
+      expect(coolingUntil(db)).toBe(unconfirmed);
+
+      await guard.release(claimId, 'timeout');
+      expect(coolingUntil(db)).toBe(unconfirmed);
+    });
+
+    it('keeps the confirmed outcome when a late timeout release arrives', async () => {
+      // The mirror of the case below, and the ONLY case in which the timeout
+      // branch's `outcome IS NULL` is load-bearing: that branch writes just
+      // `outcome`, never `cooling_until`, so repeating it is inherently a
+      // no-op. What the guard prevents is a late timeout OVERWRITING a
+      // recorded success -- which would tell a retrying client its pulse
+      // timed out when the gate had in fact moved.
+      const db = open(onDiskPath());
+      const clock = new FakeClock();
+      const guard = new SqliteCommandGuard(db, clock);
+      const claimId = await grantOne(db, clock);
+      const narrowed = clock.now().getTime() + COOLDOWN_MS;
+
+      await guard.release(claimId, 'success');
+      await guard.release(claimId, 'timeout');
+
+      expect(coolingUntil(db)).toBe(narrowed);
+      expect(await guard.tryClaim(claimParams('key-a'))).toMatchObject({
+        kind: 'replayed',
+        outcome: 'success',
+      });
+    });
+
+    it('keeps the timeout window when a confirmed release arrives afterwards', async () => {
+      // The first outcome recorded is the real one; a later arrival is a
+      // duplicate, not new evidence, so it must not narrow an unconfirmed
+      // window that a timeout already claimed.
+      const db = open(onDiskPath());
+      const clock = new FakeClock();
+      const guard = new SqliteCommandGuard(db, clock);
+      const claimId = await grantOne(db, clock);
+      const unconfirmed = clock.now().getTime() + COOLDOWN_MS * UNCONFIRMED_COOLDOWN_MULTIPLIER;
+
+      await guard.release(claimId, 'timeout');
+      await guard.release(claimId, 'success');
+
+      expect(coolingUntil(db)).toBe(unconfirmed);
+      clock.advance(COOLDOWN_MS + 1); // past 1x -- would be granted had it narrowed
+      expect((await guard.tryClaim(claimParams('key-b'))).kind).toBe('cooling-down');
+    });
+  });
+
   it('stops replaying once the idempotency window lapses', async () => {
     const clock = new FakeClock();
     const guard = new SqliteCommandGuard(open(onDiskPath()), clock);

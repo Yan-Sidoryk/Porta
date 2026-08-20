@@ -27,6 +27,11 @@ export class SqliteCommandGuard implements CommandGuardPort {
     cooldownMs: number;
     idempotencyWindowMs: number;
   }): Promise<ClaimResult> {
+    // Wall-clock, deliberately. A monotonic clock cannot be compared across a
+    // process restart, and surviving a restart is the whole point of storing
+    // the window in sqlite. The cost: an NTP step FORWARD larger than the
+    // remaining window expires the cooldown early -- the one case where this
+    // guard fails open. A backward step only widens the window, which is safe.
     const now = this.clock.now().getTime();
 
     // IMMEDIATE takes the write lock at transaction START, so the read and
@@ -91,8 +96,16 @@ export class SqliteCommandGuard implements CommandGuardPort {
     // written at claim time stands. An abandoned claim -- never released at
     // all -- keeps that same 2x, which is the point: every unknown resolves
     // conservatively, and no unknown is ever weaker than a timeout.
+    // `outcome IS NULL` on BOTH branches makes release once-only: the first
+    // outcome recorded wins and any later call is a no-op. Without it the
+    // narrowing UPDATE is not idempotent -- applied twice it divides the
+    // window twice (2x -> 1x -> 0.5x), silently halving the guard. The port
+    // does not promise a single call, so a retry, a queue redelivery, or a
+    // future adapter could reach it.
     if (outcome === 'timeout') {
-      this.db.prepare(`UPDATE command_claims SET outcome = ? WHERE id = ?`).run(outcome, claimId);
+      this.db
+        .prepare(`UPDATE command_claims SET outcome = ? WHERE id = ? AND outcome IS NULL`)
+        .run(outcome, claimId);
       return;
     }
 
@@ -101,7 +114,7 @@ export class SqliteCommandGuard implements CommandGuardPort {
         `UPDATE command_claims
             SET outcome = ?,
                 cooling_until = claimed_at + (cooling_until - claimed_at) / ?
-          WHERE id = ?`,
+          WHERE id = ? AND outcome IS NULL`,
       )
       .run(outcome, UNCONFIRMED_COOLDOWN_MULTIPLIER, claimId);
   }

@@ -9,10 +9,13 @@
   },
   "dependencies": {
     "@gate/shared": "*",
-    "better-sqlite3": "^13.0.3"
+    "argon2": "^0.45.1",
+    "better-sqlite3": "^13.0.3",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.13.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"

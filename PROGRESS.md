@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: Task 9 of 12 done (milestone 1–5 plan)
+## Status: Task 10 of 12 done (milestone 1–5 plan)
 
 Branch: `build/gate-opener-backend`
 
@@ -80,9 +80,19 @@ Access tokens pin HS256 on verify; the first test of that pin was worthless
 with an HS512-signed-with-the-real-secret token, which only a pinned verifier
 rejects.
 
+**Task 10 — remaining use cases.** Login answers a wrong password, an unknown
+email and a disabled account with one identical value from one branch, and
+always runs a verification — an unknown email is checked against a real
+argon2id hash of nothing, so response time is not an account-existence oracle.
+Refresh consumes then reissues, and a disabled user's outstanding refresh
+tokens are revoked, so disabling an account ends the sessions it already has.
+Grants are owner-only and reject a window that cannot grant anything.
+`ListAuditEvents` rebuilds each row field by field, so `detail` (a redacted
+stack trace) cannot reach a client even if `AuditEntry` grows a field.
+
 ## Tested
 
-`npm test` at the root: **120 backend + 4 shared passing.**
+`npm test` at the root: **145 backend + 4 shared passing.**
 
 Every safety-critical invariant is proven by mutation — the test is shown
 failing against a deliberately broken implementation before it counts. This has
@@ -93,15 +103,18 @@ claimed to.
 
 ## Next
 
-**Task 10** — remaining use cases (auth, status, audit, grants). Then: API +
-composition root (11), and the Expo vertical slice on a physical phone (12).
+**Task 11** — config, composition root, API routes, and the `create-user` CLI.
+Then the Expo vertical slice on a physical phone (12).
 
 Carried forward into later tasks (full detail in the ledger):
 
-- **Task 10** must reject a malformed grant where `startsAt >= endsAt`.
-- **Task 10**'s `RefreshSessionUseCase` issues the replacement refresh token.
-  `consumeRefreshToken` only revokes and identifies — the port returns
-  `{ userId }`, so rotation is not complete until the caller reissues.
+- **Task 11** must pass infrastructure's `verifyPassword` into
+  `AuthenticateUserUseCase` — it takes a plain function, so wiring a stub
+  there silently accepts every password.
+- **Task 11** owns `POST /auth/logout`: there is no use case for it, just
+  `TokenServicePort.revokeRefreshTokensFor`.
+- **Task 11** serialises `GateState.checkedAt` and `AuditEventView.createdAt`
+  as ISO strings; both use cases return real `Date`s.
 - **Task 11** must assert the composition root wires the real redactor, not an
   identity function; must strip `internalDetail` before serialising; and must
   copy `schema.sql` alongside any compiled output. It must also leave
@@ -111,6 +124,13 @@ Carried forward into later tasks (full detail in the ledger):
 ## Open questions
 
 None blocking.
+
+Known gap, accepted: `FakeTokenService` mirrors `JwtTokenService`'s single-use
+refresh semantics but no shared contract test binds them, as `CommandGuardPort`
+has. Judged tolerable because single-use is proven directly against the real
+implementation and no use-case logic depends on the fake's replay behaviour —
+`RefreshSessionUseCase` only distinguishes null from non-null. Revisit if a
+second implementation appears.
 
 ## Deferred to a second plan
 

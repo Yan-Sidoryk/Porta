@@ -51,6 +51,9 @@ export class FakeGuard implements CommandGuardPort {
     this.releaseCalls += 1;
     const claim = this.claims.find((c) => c.id === claimId);
     if (!claim) return;
+    // Once-only, mirroring the SQLite guard's `AND outcome IS NULL`: the first
+    // outcome recorded wins. Narrowing twice would halve the window.
+    if (claim.outcome !== null) return;
     claim.outcome = outcome;
     if (outcome !== 'timeout') {
       claim.coolingUntil = claim.claimedAt + (claim.coolingUntil - claim.claimedAt) / UNCONFIRMED_COOLDOWN_MULTIPLIER;

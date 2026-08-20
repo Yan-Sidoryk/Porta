@@ -92,6 +92,49 @@ export function runCommandGuardContract(
       expect(r).toMatchObject({ kind: 'replayed', outcome: 'device-offline' });
     });
 
+    // release() is once-only: the first outcome recorded wins and any later
+    // call is a no-op. Asserted purely through tryClaim, since the contract
+    // cannot see either implementation's stored state.
+    it('does not narrow the window twice when a confirmed release is repeated', async () => {
+      const first = await claim(guard, KEY);
+      if (first.kind !== 'granted') throw new Error('expected granted');
+      await guard.release(first.claimId, 'success');
+      await guard.release(first.claimId, 'success');
+
+      // Halving twice would land the window at COOLDOWN / 2, so a probe just
+      // inside 1x would be granted instead of cooling down.
+      clock.advance(COOLDOWN - 1);
+      expect((await claim(guard, KEY2)).kind).toBe('cooling-down');
+
+      clock.advance(2); // now just past 1x
+      expect((await claim(guard, KEY3)).kind).toBe('granted');
+    });
+
+    it('does not let a confirmed release arriving after a timeout narrow the window', async () => {
+      const first = await claim(guard, KEY);
+      if (first.kind !== 'granted') throw new Error('expected granted');
+      await guard.release(first.claimId, 'timeout');
+      await guard.release(first.claimId, 'success');
+
+      clock.advance(COOLDOWN + 1); // past 1x -- would be granted had it narrowed
+      expect((await claim(guard, KEY2)).kind).toBe('cooling-down');
+
+      clock.advance(COOLDOWN); // now past 2x
+      expect((await claim(guard, KEY3)).kind).toBe('granted');
+    });
+
+    it('keeps the confirmed outcome when a timeout release arrives after it', async () => {
+      // A late timeout must not overwrite a recorded success, or a client
+      // retrying its key is told the pulse failed when the gate really moved.
+      const first = await claim(guard, KEY);
+      if (first.kind !== 'granted') throw new Error('expected granted');
+      await guard.release(first.claimId, 'success');
+      await guard.release(first.claimId, 'timeout');
+
+      const replay = await claim(guard, KEY);
+      expect(replay).toMatchObject({ kind: 'replayed', outcome: 'success' });
+    });
+
     it('counts retryAfterMs down from real elapsed time', async () => {
       await claim(guard, KEY);
 

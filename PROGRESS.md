@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: Task 8 of 12 done (milestone 1–5 plan)
+## Status: Task 9 of 12 done (milestone 1–5 plan)
 
 Branch: `build/gate-opener-backend`
 
@@ -70,9 +70,19 @@ map its reply. Tested against a real `node:http` stub server on port 0 — no
 mocking library. The no-retry rule is the point of the task: a timeout does not
 mean the pulse failed, and a second pulse stops a moving gate.
 
+**Task 9 — auth infrastructure.** argon2id via the `argon2` package (defaults,
+no hand-tuned cost parameters), `JwtTokenService`, `SystemClock`,
+`InMemoryRateLimiter`. Refresh tokens are not JWTs: 32 random bytes, only the
+SHA-256 stored, single-use because revoking *is* the lookup — one guarded
+`UPDATE ... RETURNING`, so a replayed token cannot come back with a user twice.
+Access tokens pin HS256 on verify; the first test of that pin was worthless
+(jsonwebtoken already refuses `alg:none` for a string secret) and was replaced
+with an HS512-signed-with-the-real-secret token, which only a pinned verifier
+rejects.
+
 ## Tested
 
-`npm test` at the root: **97 backend + 4 shared passing.**
+`npm test` at the root: **120 backend + 4 shared passing.**
 
 Every safety-critical invariant is proven by mutation — the test is shown
 failing against a deliberately broken implementation before it counts. This has
@@ -83,13 +93,15 @@ claimed to.
 
 ## Next
 
-**Task 9** — auth infrastructure (argon2id, JWT, rate limiter, clock). Then:
-remaining use cases (10), API + composition root (11), and the Expo vertical
-slice on a physical phone (12).
+**Task 10** — remaining use cases (auth, status, audit, grants). Then: API +
+composition root (11), and the Expo vertical slice on a physical phone (12).
 
 Carried forward into later tasks (full detail in the ledger):
 
 - **Task 10** must reject a malformed grant where `startsAt >= endsAt`.
+- **Task 10**'s `RefreshSessionUseCase` issues the replacement refresh token.
+  `consumeRefreshToken` only revokes and identifies — the port returns
+  `{ userId }`, so rotation is not complete until the caller reissues.
 - **Task 11** must assert the composition root wires the real redactor, not an
   identity function; must strip `internalDetail` before serialising; and must
   copy `schema.sql` alongside any compiled output. It must also leave

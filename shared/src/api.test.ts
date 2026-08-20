@@ -19,13 +19,21 @@ describe('TriggerResponseSchema', () => {
       code: 'GATE_COOLING_DOWN',
       message: 'Cooling down',
       retryAfterMs: 4200,
+      replayed: false,
     });
     expect(parsed).toMatchObject({ ok: false, retryAfterMs: 4200 });
   });
 
   it('rejects an unknown error code', () => {
     const bad = TriggerResponseSchema.safeParse({
-      ok: false, code: 'MADE_UP', message: 'x',
+      ok: false, code: 'MADE_UP', message: 'x', replayed: false,
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('requires replayed on a failure -- omitting it must fail validation', () => {
+    const bad = TriggerResponseSchema.safeParse({
+      ok: false, code: 'GATE_COOLING_DOWN', message: 'Cooling down',
     });
     expect(bad.success).toBe(false);
   });

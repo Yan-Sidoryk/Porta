@@ -106,7 +106,9 @@ describe('TriggerGateUseCase', () => {
     );
     await guard.tryClaim({ idempotencyKey: KEY, cooldownMs: COOLDOWN, idempotencyWindowMs: 60_000 });
     const r = await slow.execute('owner1', KEY);
-    expect(r).toMatchObject({ ok: false, code: 'ATTEMPT_IN_PROGRESS' });
+    // replayed: true -- the key was recognised and no pulse was sent, which is
+    // exactly what "replayed" means even while the original attempt is pending.
+    expect(r).toMatchObject({ ok: false, code: 'ATTEMPT_IN_PROGRESS', replayed: true });
     expect(gate.calls).toBe(0);
   });
 
@@ -132,6 +134,21 @@ describe('TriggerGateUseCase', () => {
     const r = await uc.execute('owner1', KEY);
     expect(r).toMatchObject({ ok: false, code: 'INTERNAL', replayed: false });
     expect(guard.releaseCalls).toBe(0);
+  });
+
+  it('carries the bound error as internalDetail, never dropping diagnostics', async () => {
+    const throwingGate: GateCommandPort = {
+      pulse: () => { throw new Error('boom'); },
+    };
+    const uc = new TriggerGateUseCase(
+      new FakeUserRepo([owner]), new FakeGrantRepo([]),
+      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN,
+    );
+    const r = await uc.execute('owner1', KEY);
+    expect(r).toMatchObject({ ok: false, code: 'INTERNAL' });
+    if (r.ok) throw new Error('expected a failure result');
+    expect(r.internalDetail).toBeDefined();
+    expect(r.internalDetail).toContain('boom');
   });
 
   it('returns INTERNAL without pulsing when the user repository throws', async () => {

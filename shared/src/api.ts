@@ -16,7 +16,7 @@ export const TriggerResponseSchema = z.discriminatedUnion('ok', [
     code: z.enum(ERROR_CODES),
     message: z.string(),
     retryAfterMs: z.number().int().nonnegative().optional(),
-    replayed: z.boolean().optional(),
+    replayed: z.boolean(),
   }),
 ]);
 

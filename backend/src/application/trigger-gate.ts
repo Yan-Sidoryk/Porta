@@ -7,7 +7,20 @@ import { IDEMPOTENCY_WINDOW_MS } from '../domain/constants.js';
 
 export type TriggerResult =
   | { ok: true; outcome: PulseOutcome; replayed: boolean }
-  | { ok: false; code: ErrorCode; retryAfterMs?: number; replayed: boolean };
+  | {
+      ok: false;
+      code: ErrorCode;
+      retryAfterMs?: number;
+      replayed: boolean;
+      /**
+       * Diagnostic detail for an INTERNAL failure (adapter error message + stack).
+       * Never sent to the client: absent from TriggerResponseSchema in shared/ on
+       * purpose, so leaking it onto the wire is a type error, not a runtime bug.
+       * Exists for the auditing decorator (Task 5) to write into the audit log;
+       * the API layer (Task 11) strips this field before serialising a response.
+       */
+      internalDetail?: string;
+    };
 
 export interface TriggerGate {
   execute(userId: string, idempotencyKey: string): Promise<TriggerResult>;
@@ -61,8 +74,11 @@ export class TriggerGateUseCase implements TriggerGate {
         return { ok: false, code: 'GATE_COOLING_DOWN', retryAfterMs: claim.retryAfterMs, replayed: false };
       }
       if (claim.kind === 'replayed') {
+        // Reached only when the guard recognised the key -- no pulse was sent
+        // either way, so `replayed` is true even while the original attempt
+        // is still in flight ('pending').
         return claim.outcome === 'pending'
-          ? { ok: false, code: 'ATTEMPT_IN_PROGRESS', replayed: false }
+          ? { ok: false, code: 'ATTEMPT_IN_PROGRESS', replayed: true }
           : toResult(claim.outcome, true);
       }
 
@@ -73,10 +89,13 @@ export class TriggerGateUseCase implements TriggerGate {
       const result = await this.gate.pulse();
       await this.guard.release(claim.claimId, result.outcome);
       return toResult(result.outcome, false);
-    } catch {
+    } catch (err) {
       // Adapter failure (SQLite, HTTP, etc). Never let a raw exception cross
       // the layer boundary; never release a claim here -- see the note above.
-      return { ok: false, code: 'INTERNAL', replayed: false };
+      // The bound error is carried out as internalDetail for diagnostics only
+      // (see the field's doc comment) -- never returned to the client.
+      const internalDetail = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+      return { ok: false, code: 'INTERNAL', replayed: false, internalDetail };
     }
   }
 }

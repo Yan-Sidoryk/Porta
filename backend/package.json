@@ -7,10 +7,12 @@
     "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/infrastructure/db/schema.sql','dist/infrastructure/db/schema.sql')\"",
     "start": "node --env-file=../.env dist/server.js",
     "create-user": "node --env-file=../.env dist/scripts/create-user.js",
+    "stub-shelly": "node dist/scripts/stub-shelly.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@gate/shared": "*",
     "argon2": "^0.45.1",
     "better-sqlite3": "^13.0.3",
@@ -22,6 +24,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.13.3",
+    "selfsigned": "^5.5.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }

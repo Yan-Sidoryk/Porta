@@ -8,17 +8,21 @@ const config = loadConfig(process.env);
 const container = buildContainer(config);
 
 const app = buildApp(container, {
-  level: config.nodeEnv === 'production' ? 'info' : 'debug',
-  // SHELLY_AUTH_KEY must never reach a log line. `authKey` is the field name
-  // on ShellyConfig and `auth_key` the query parameter, so both are censored
-  // wherever they appear, along with anything that grants a session.
-  redact: {
-    paths: [
-      'req.headers.authorization', 'req.headers.cookie',
-      '*.password', '*.authKey', '*.auth_key', '*.accessToken', '*.refreshToken',
-      'password', 'authKey', 'auth_key', 'accessToken', 'refreshToken',
-    ],
-    censor: '[redacted]',
+  // Never in production: see AppOptions.allowCors.
+  allowCors: config.nodeEnv !== 'production',
+  logger: {
+    level: config.nodeEnv === 'production' ? 'info' : 'debug',
+    // SHELLY_AUTH_KEY must never reach a log line. `authKey` is the field name
+    // on ShellyConfig and `auth_key` the query parameter, so both are censored
+    // wherever they appear, along with anything that grants a session.
+    redact: {
+      paths: [
+        'req.headers.authorization', 'req.headers.cookie',
+        '*.password', '*.authKey', '*.auth_key', '*.accessToken', '*.refreshToken',
+        'password', 'authKey', 'auth_key', 'accessToken', 'refreshToken',
+      ],
+      censor: '[redacted]',
+    },
   },
 });
 

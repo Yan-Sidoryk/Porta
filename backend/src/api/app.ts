@@ -1,6 +1,7 @@
 import Fastify, {
   type FastifyError, type FastifyInstance, type FastifyServerOptions,
 } from 'fastify';
+import cors from '@fastify/cors';
 import type { Container } from '../composition-root.js';
 import { fail } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -11,11 +12,28 @@ import { registerGrantRoutes } from './routes/grants.js';
 /** Every request body here is a handful of short fields. */
 const BODY_LIMIT_BYTES = 16 * 1024;
 
+export interface AppOptions {
+  logger?: FastifyServerOptions['logger'];
+  /**
+   * Development only, and off unless asked for. The Expo dev client runs in a
+   * browser-like origin and needs CORS; a shipped app is a native binary that
+   * sends no `Origin` at all, so enabling this in production buys nothing and
+   * hands a browser a way to call the gate on a signed-in user's behalf.
+   */
+  allowCors?: boolean;
+}
+
 export function buildApp(
   container: Container,
-  logger: FastifyServerOptions['logger'] = false,
+  { logger = false, allowCors = false }: AppOptions = {},
 ): FastifyInstance {
   const app = Fastify({ logger, bodyLimit: BODY_LIMIT_BYTES });
+
+  if (allowCors) {
+    // Reflects the request origin: a dev machine's LAN address changes with
+    // the DHCP lease, and pinning a list here would be re-edited weekly.
+    app.register(cors, { origin: true });
+  }
 
   app.decorateRequest('auth', null);
 

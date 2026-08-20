@@ -40,6 +40,8 @@ let gateState: FakeGateState;
 let tokens: FakeTokenService;
 let audit: FakeAuditLog;
 
+let container: Container;
+
 const setup = (): void => {
   clock = new FakeClock();
   gate = new FakeGateCommand();
@@ -49,7 +51,7 @@ const setup = (): void => {
 
   const users = new FakeUserRepo([owner, guest]);
   const grants = new FakeGrantRepo();
-  const container: Container = {
+  container = {
     trigger: new AuditedTriggerGate(
       new TriggerGateUseCase(
         users, grants, new RoleBasedAccessPolicy(), new FakeGuard(clock), gate, clock, COOLDOWN,
@@ -80,6 +82,26 @@ const trigger = (user: User, idempotencyKey: string) =>
   });
 
 beforeEach(setup);
+
+describe('CORS', () => {
+  const preflight = (instance: FastifyInstance) =>
+    instance.inject({
+      method: 'OPTIONS', url: '/auth/login',
+      headers: { origin: 'http://192.168.1.50:8081', 'access-control-request-method': 'POST' },
+    });
+
+  it('sends no CORS headers by default', async () => {
+    const res = await preflight(buildApp(container));
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  // The switch exists so production says no. A shipped app is a native binary
+  // that sends no Origin, so this only ever serves the Expo dev client.
+  it('reflects the origin only when explicitly allowed', async () => {
+    const res = await preflight(buildApp(container, { allowCors: true }));
+    expect(res.headers['access-control-allow-origin']).toBe('http://192.168.1.50:8081');
+  });
+});
 
 describe('POST /gate/trigger', () => {
   it('rejects a request with no token', async () => {

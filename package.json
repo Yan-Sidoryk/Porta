@@ -1,7 +1,7 @@
 {
   "name": "gate-opener",
   "private": true,
-  "workspaces": ["shared", "backend"],
+  "workspaces": ["shared", "backend", "app"],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run build -w shared && npm run test --workspaces --if-present",

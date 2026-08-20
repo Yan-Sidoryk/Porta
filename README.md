@@ -1,0 +1,407 @@
+# Smart gate opener
+
+Opens and closes a physical driveway gate from a phone.
+
+This is safety-relevant software. A bug here moves a heavy metal gate in the
+real world, so the whole system is built to be conservative: it never invents
+state it does not have, it never retries a command it is not sure about, and it
+refuses to start rather than run misconfigured.
+
+---
+
+## The hardware, and why the software looks like this
+
+You cannot change any of this, and every design decision below follows from it.
+
+```
+app  →  backend  →  Shelly Cloud  →  Shelly 1 Gen4  →  R70/2AC  →  gate
+```
+
+- A **Roger Technology R70/2AC** control board drives the gate. It owns all
+  motion logic, safety inputs and auto-close. This software does not control
+  motors.
+- A **Shelly 1 Gen4** relay bridges the R70's **PP (step-by-step)** input.
+  Closing that contact briefly is exactly like pressing the physical remote.
+
+Three consequences shape everything:
+
+**1. There is one command, a pulse.** No "open", no "close". The R70's PP
+sequence is open → stop → close → stop, so what a pulse does depends on what
+the gate is currently doing. The app shows a single button for this reason —
+two buttons would be a lie.
+
+**2. A second pulse mid-travel stops the gate.** This is the main failure mode
+the system exists to prevent. It is why there is a cooldown, why the same tap
+retried never sends a second pulse, and why a timed-out request is *never*
+retried automatically.
+
+**3. There is no position sensor.** The system genuinely does not know whether
+the gate is open or closed, and says so. It reports `position: "unknown"` and
+the device's online/offline state. Never infer position from command history —
+a gate app that confidently says "Closed" when it doesn't know is worse than
+one that admits ignorance.
+
+The physical remote keeps working and anyone can use it at any time, so cached
+state is never authoritative.
+
+---
+
+## What the backend is
+
+A small HTTP service. It is the only component that ever talks to Shelly, and
+the only place the Shelly credential exists.
+
+It exists because the alternative — the phone talking to Shelly directly —
+would put an **account-wide, non-expiring** Shelly key on every phone. Anyone
+extracting it would control every device on the account, forever. Instead the
+phone gets a 15-minute token for one narrow API.
+
+The backend owns:
+
+- **Authorisation** — who may operate the gate, and when.
+- **The cooldown and idempotency guard** — the safety logic above.
+- **The audit log** — who tried what, and what happened. Failed and denied
+  attempts matter more than successful ones.
+- **The Shelly credential** — which never leaves the process.
+
+### Layout
+
+```
+domain/          entities, ports, typed errors. Zero outward imports.
+application/     use cases. Depend only on domain ports.
+infrastructure/  adapters: Shelly, SQLite, JWT, argon2, clock, rate limiter.
+api/             thin Fastify routes: parse, call a use case, map the result.
+composition-root.ts   the only file that names a concrete adapter.
+```
+
+Dependencies point inward only. Swapping Shelly Cloud for local network
+control is a one-line change in `composition-root.ts` — see `gateCommand`.
+
+Repository layout:
+
+| Path | What |
+|---|---|
+| `backend/` | the HTTP service |
+| `shared/` | Zod schemas and types for the API contract, used by both sides |
+| `app/` | Expo mobile app |
+| `SPEC.md` | the original build brief |
+| `PROGRESS.md` | current state, decisions, and what is still owed |
+
+---
+
+## Requirements
+
+- **Node 20.6+** (the scripts use `node --env-file`). Developed on 25.2.1.
+- npm 10+ (workspaces).
+- A Shelly Cloud account with the gate's Shelly 1 Gen4 registered.
+- For the phone app: **Expo Go**, and a phone on the same Wi-Fi as your dev
+  machine.
+
+---
+
+## Setup
+
+### 1. Install
+
+```bash
+npm install
+```
+
+This installs all three workspaces. `shared` builds itself on install — the
+backend imports it as a compiled package.
+
+### 2. Create `.env` **in the repository root**
+
+Not in `backend/`. The scripts read `../.env` relative to the backend
+workspace, so the file belongs at the top level. It is gitignored and must stay
+that way.
+
+```bash
+cp .env.example .env
+```
+
+Then fill it in:
+
+| Variable | Required | What it is |
+|---|---|---|
+| `SHELLY_HOST` | yes | Your account's Shelly server, e.g. `shelly-53-eu.shelly.cloud` |
+| `SHELLY_AUTH_KEY` | yes | Account-wide Shelly cloud key |
+| `SHELLY_DEVICE_ID` | yes | The relay's device id |
+| `JWT_SECRET` | yes | **At least 32 characters.** Random, not a passphrase |
+| `GATE_COOLDOWN_MS` | yes | `5000` unless you have a reason |
+| `DATABASE_PATH` | yes | `./gate.db` — relative to `backend/` when started via npm |
+| `PUBLIC_URL` | yes | How the service is reached. Must be `https://` in production |
+| `NODE_ENV` | yes | `development`, `test`, or `production` |
+| `PORT` | no | Defaults to `3000` |
+| `HOST` | no | Defaults to `0.0.0.0`, which is what lets a phone reach it |
+
+Generate a secret with:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+The service **refuses to boot** if any required variable is missing, naming the
+ones that are wrong and never printing their values. That is deliberate: you
+find out at deploy time, not at 2am.
+
+#### Getting the three Shelly values
+
+All of them come from the Shelly Cloud web control panel (`control.shelly.cloud`):
+
+- **`SHELLY_AUTH_KEY` and `SHELLY_HOST`** come from the same place — the user
+  settings area, under authorisation / cloud key. The dialog that reveals the
+  key also shows the **server URL** for your account; strip the scheme and use
+  the hostname (`shelly-53-eu.shelly.cloud`). Accounts are pinned to a
+  particular server, so this is not the same for everyone. Menu wording shifts
+  between Shelly UI versions — look for "cloud key" or "authorization cloud key".
+- **`SHELLY_DEVICE_ID`** is on the device's own settings/info page, usually
+  labelled device ID.
+
+> **The auth key is account-wide and does not expire.** Anyone holding it
+> controls every device on the account. It belongs in `.env` and nowhere else —
+> never in the app, never in a commit, never in a log.
+
+### 3. Build
+
+```bash
+npm run build
+```
+
+The backend runs from compiled output, so this is required before starting.
+
+### 4. Create the first user
+
+There is no signup endpoint — deliberately. A door opener with public
+registration is a door opener anyone can register for. Accounts are created
+with a CLI, on the host:
+
+```bash
+npm run create-user -w backend -- --email you@example.com --password 'a-real-password' --role owner
+```
+
+The `--` matters; without it npm eats the flags. It prints the new user's id.
+
+Roles: `owner` can always operate the gate and can issue access grants.
+`user` can do **nothing** until an owner grants them a time window — that is
+the default branch, not an oversight.
+
+> The password is a command-line argument, so it lands in your shell history
+> and in `ps` output. Run this on the host and clear the history line after.
+
+### 5. Run
+
+```bash
+npm start -w backend
+```
+
+---
+
+## Running it without moving a real gate
+
+**Every trigger against a real `SHELLY_HOST` moves the actual gate.** For
+development, point the backend at the bundled stub instead:
+
+```bash
+npm run stub-shelly -w backend
+```
+
+It prints the two values to use:
+
+```
+SHELLY_HOST=127.0.0.1:8443
+NODE_EXTRA_CA_CERTS=<path to a certificate it generated>
+```
+
+Put the first in `.env` and set the second in the environment before starting
+the backend. The stub speaks HTTPS because the backend only ever builds
+`https://` URLs — there is no environment variable that can downgrade that.
+The certificate is generated fresh at startup into the temp directory, so no
+private key is ever committed.
+
+The stub logs every request it receives, which is how you can prove the
+cooldown and replay guards are working: tap twice quickly and you will see
+**one** switch request, not two.
+
+---
+
+## The mobile app
+
+```bash
+npm start -w app
+```
+
+Scan the QR code with Expo Go, on a phone on the same Wi-Fi.
+
+The app finds the backend automatically: it reads the LAN address Metro is
+already serving the bundle from and targets port 3000 there. A phone cannot
+resolve your machine's `localhost`, and an IP pasted into `app.json` goes stale
+the next time your router hands out a lease. To override — which is what a real
+build does — set `extra.apiUrl` in `app/app.json`.
+
+Tokens are stored with `expo-secure-store` (iOS keychain / Android keystore),
+never `AsyncStorage`.
+
+The app is pinned to **Expo SDK 54** to match the Expo Go available on the
+target phone.
+
+> **Status:** the app is currently the thin vertical slice from Task 12 — two
+> fields, two buttons, raw JSON results. It proves the wire works. The real UI
+> is the next milestone. It has been verified end to end against the stub from
+> a desktop, but **not yet from a physical phone**; see `PROGRESS.md`.
+
+Expect a Windows Firewall prompt for Node the first time a phone connects.
+
+---
+
+## API
+
+All routes except login and refresh need `Authorization: Bearer <accessToken>`.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/auth/login` | `{email, password}` | `{accessToken, refreshToken}` |
+| `POST` | `/auth/refresh` | `{refreshToken}` | `{accessToken, refreshToken}` |
+| `POST` | `/auth/logout` | — | `204` |
+| `POST` | `/gate/trigger` | `{idempotencyKey}` (uuid) | `{ok, outcome, replayed}` |
+| `GET` | `/gate/status` | — | `{position, reachable, checkedAt}` |
+| `GET` | `/audit?limit=n` | — | recent events, newest last |
+| `POST` | `/access-grants` | `{userId, startsAt, endsAt}` | `{grantId}` |
+| `DELETE` | `/access-grants/:id` | — | `204` |
+
+Access tokens last 15 minutes. Refresh tokens are single-use and rotate: using
+one revokes it and issues a replacement, so a stolen token cannot be replayed.
+Disabling an account revokes its outstanding refresh tokens immediately.
+
+### Failures
+
+Every non-2xx body is `{ok: false, code, message}`, plus `retryAfterMs` on a
+cooldown rejection.
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `GATE_COOLING_DOWN` | 409 | Too soon after the last pulse. Carries `retryAfterMs` |
+| `ATTEMPT_IN_PROGRESS` | 409 | That same tap is still in flight |
+| `TIMEOUT_AMBIGUOUS` | 504 | Shelly did not answer. **The pulse may have fired** |
+| `DEVICE_OFFLINE` | 502 | The relay is unreachable — usually Wi-Fi at the pillar |
+| `DEVICE_FAILED_COMMAND` / `DEVICE_NOT_FOUND` | 502 | Shelly rejected it |
+| `ACCESS_DENIED` | 403 | Not allowed, no such account, or account disabled |
+| `SESSION_EXPIRED` | 401 | Token missing, expired or invalid |
+| `RATE_LIMITED` | 429 | Too many requests |
+| `BAD_REQUEST` | 400 | Malformed body |
+| `INTERNAL` | 500 | Something failed inside |
+
+`ACCESS_DENIED` is deliberately identical whether the account doesn't exist, is
+disabled, or simply lacks a grant. Login failures are identical for an unknown
+email and a wrong password, and take the same amount of time — the endpoint is
+not a directory of who has an account.
+
+Rate limits: login 10/min per IP *and* per email; trigger 20/min per user and
+60/min per IP.
+
+---
+
+## The safety rules
+
+Worth understanding before changing anything in `application/` or
+`infrastructure/db/command-guard.ts`.
+
+**Cooldown.** No pulse within `GATE_COOLDOWN_MS` of the last one. The claim is
+written *before* Shelly is called, not after — otherwise the cooldown would be
+blind for the entire duration of an in-flight request, which is exactly the
+window it exists to protect.
+
+**Pessimistic window.** The claim is written at 2× the cooldown and narrowed to
+1× only when the outcome is *confirmed*. An attempt whose fate is unknown — a
+timeout, or a process that died mid-request — therefore holds the **longer**
+guard. Writing 1× up front and extending on timeout would invert this, giving
+the case with less information a weaker guard.
+
+**Idempotency.** The app generates one UUID per user-initiated tap and reuses
+it across retries. Within 60 seconds the same key returns the original result
+instead of pulsing again.
+
+**No retries. Anywhere.** A timeout does not mean the command failed — it may
+well have succeeded. Retrying risks a second pulse that stops a moving gate, so
+the ambiguity is surfaced to the user instead. Do not add a retry to the
+adapter, the client, or the use case.
+
+**Auditing wraps the use case** rather than sitting inside it, so attempts that
+are rejected early — unknown user, access denied — are recorded by
+construction rather than by remembering to log on every branch.
+
+---
+
+## Deploying behind TLS
+
+**Terminate TLS at a reverse proxy.** The Node process never handles
+certificates; it refuses to boot in production unless `PUBLIC_URL` starts with
+`https://`, which is the operator asserting that something in front is doing
+the job.
+
+1. Point a domain at the host.
+2. Get a certificate (Caddy and Certbot both automate this).
+3. Proxy to the backend on `PORT`.
+4. Set `NODE_ENV=production` and `PUBLIC_URL=https://gate.example.com`.
+5. Bind the backend to localhost (`HOST=127.0.0.1`) so it is only reachable
+   through the proxy.
+6. Run it under a process supervisor — systemd is fine — as a non-root user
+   that owns the database file.
+
+Caddy needs about this much:
+
+```
+gate.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+CORS is enabled **only** outside production, for the Expo dev client. A shipped
+app is a native binary that sends no `Origin`, so production does not need it
+and does not get it.
+
+Back up `gate.db`. It holds your users, grants and audit history.
+
+---
+
+## Tests
+
+```bash
+npm test          # 180 backend + 4 shared
+npm run typecheck # all three workspaces
+```
+
+Run these from the **root**. `npm test -w backend` alone can run against a
+stale `@gate/shared` build.
+
+Every safety-critical invariant is proven by mutation: the implementation is
+deliberately broken, the test is watched failing, then reverted. A test that
+has never failed has told you nothing. No test calls the real Shelly API —
+each one would move a real gate.
+
+---
+
+## Troubleshooting
+
+**`Invalid configuration: X, Y`** — those variables are missing or malformed in
+`.env`. Note that `.env` goes in the repo root, not `backend/`.
+
+**`PUBLIC_URL must use https:// in production`** — working as intended. Either
+put a TLS proxy in front, or you are not actually in production.
+
+**Phone can't reach the backend** — check `HOST=0.0.0.0` (not `127.0.0.1`),
+that both devices are on the same network, and that the firewall is allowing
+Node. `GET /gate/status` from a laptop browser on the same Wi-Fi is a quick
+check.
+
+**`Project is incompatible with this version of Expo Go`** — the app's SDK is
+newer than the installed Expo Go. Either update Expo Go, or pin the app down
+with `npx expo install --fix` after changing the `expo` version.
+
+**Metro fails on a React Native internal file after an SDK change** — stale
+hoisted packages. Delete `node_modules` everywhere plus `package-lock.json` and
+reinstall; `npm prune` is not enough.
+
+**`reachable: false` with a real device** — the relay has lost Wi-Fi, or
+`SHELLY_DEVICE_ID` / `SHELLY_HOST` are wrong. The service reports it honestly
+rather than failing the request.

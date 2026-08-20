@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: PAUSED after Task 7 of 12 (milestone 1–5 plan)
+## Status: Task 8 of 12 done (milestone 1–5 plan)
 
 Branch: `build/gate-opener-backend`
 
@@ -64,9 +64,15 @@ Two fix rounds: `release` made once-only (a double release halved the safety
 window), and the double-release rule moved into the shared contract so both
 implementations are bound by it.
 
+**Task 8 — Shelly Cloud adapters.** One `shellyPost` function owns the URL, the
+5s `AbortSignal.timeout`, the 1 req/sec limit, and redaction; two thin adapters
+map its reply. Tested against a real `node:http` stub server on port 0 — no
+mocking library. The no-retry rule is the point of the task: a timeout does not
+mean the pulse failed, and a second pulse stops a moving gate.
+
 ## Tested
 
-`npm test` at the root: **84 backend + 4 shared passing.**
+`npm test` at the root: **97 backend + 4 shared passing.**
 
 Every safety-critical invariant is proven by mutation — the test is shown
 failing against a deliberately broken implementation before it counts. This has
@@ -77,16 +83,18 @@ claimed to.
 
 ## Next
 
-**Task 8** — Shelly Cloud adapters, including the no-retry-on-timeout rule.
-Then: auth infrastructure (9), remaining use cases (10), API + composition root
-(11), and the Expo vertical slice on a physical phone (12).
+**Task 9** — auth infrastructure (argon2id, JWT, rate limiter, clock). Then:
+remaining use cases (10), API + composition root (11), and the Expo vertical
+slice on a physical phone (12).
 
 Carried forward into later tasks (full detail in the ledger):
 
 - **Task 10** must reject a malformed grant where `startsAt >= endsAt`.
 - **Task 11** must assert the composition root wires the real redactor, not an
   identity function; must strip `internalDetail` before serialising; and must
-  copy `schema.sql` alongside any compiled output.
+  copy `schema.sql` alongside any compiled output. It must also leave
+  `ShellyConfig.insecure` unset — it exists only so the stub server can be
+  reached over `http://127.0.0.1`.
 
 ## Open questions
 

@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: milestone 1–5 plan in execution, Task 4 of 12
+## Status: PAUSED after Task 7 of 12 (milestone 1–5 plan)
 
 Branch: `build/gate-opener-backend`
 
@@ -43,30 +43,50 @@ Mutation testing found the brief's window test had a six-hour gap that made an
 off-by-one undetectable; tightened. A cross-user test was added proving one
 user's grant cannot authorize another.
 
-## In progress
+**Task 4 — `TriggerGateUseCase`**, the core safety logic. Three fix rounds.
+`execute()` gained a `try/catch` so adapter rejections cannot cross the layer
+boundary, carrying the error out on an `internalDetail` field deliberately kept
+out of the shared wire schema. A shared `CommandGuardPort` contract test was
+built here so the in-memory fake and the real SQLite guard cannot drift apart.
 
-**Task 4 — `TriggerGateUseCase`**, the core safety logic. Implemented and
-reviewed; in fix round 1 for three Important findings:
+**Task 5 — `AuditedTriggerGate`.** Auditing wraps the use case rather than
+sitting inside it, so early rejections are recorded by construction. Added a
+credential redactor: `SHELLY_AUTH_KEY` travels as a URL query parameter, so a
+failed fetch's stack can carry it verbatim into an audit row. Covers URL, JSON,
+`Authorization: Bearer`, and prefixed-key shapes.
 
-1. `execute()` had no `try/catch`, so adapter rejections crossed the layer
-   boundary. Fail-closed direction was already correct.
-2. A replayed *failure* could not report `replayed: true`, and no test covered
-   replay-of-a-failure at all.
-3. The idempotency-before-cooldown ordering was enforced only inside the test
-   fake, with nothing forcing Task 7's real SQLite guard to agree. Being fixed
-   with a shared contract test both implementations must pass.
+**Task 6 — SQLite schema and repositories.** Epoch-ms timestamps, nullable
+`audit_events.user_id` so unknown-user attempts are still recorded, idempotent
+migration, six required indexes.
+
+**Task 7 — `SqliteCommandGuard`.** Atomic claim via `db.transaction().immediate()`.
+Two fix rounds: `release` made once-only (a double release halved the safety
+window), and the double-release rule moved into the shared contract so both
+implementations are bound by it.
 
 ## Tested
 
-`npm test` at the root. 20 backend tests + 3 shared passing as of Task 4's first
-commit. Every safety-critical invariant is proven by mutation — the test is
-shown failing against a deliberately broken implementation before it counts.
+`npm test` at the root: **84 backend + 4 shared passing.**
+
+Every safety-critical invariant is proven by mutation — the test is shown
+failing against a deliberately broken implementation before it counts. This has
+repeatedly earned its keep: it caught a `Date` round-trip test passing by
+accident, a window test with a six-hour gap that made an off-by-one
+undetectable, and a boundary test that caught none of the three import shapes it
+claimed to.
 
 ## Next
 
-Tasks 5–12: auditing decorator, SQLite repositories, the atomic command guard,
-Shelly adapters, auth infrastructure, remaining use cases, API + composition
-root, and the Expo vertical slice.
+**Task 8** — Shelly Cloud adapters, including the no-retry-on-timeout rule.
+Then: auth infrastructure (9), remaining use cases (10), API + composition root
+(11), and the Expo vertical slice on a physical phone (12).
+
+Carried forward into later tasks (full detail in the ledger):
+
+- **Task 10** must reject a malformed grant where `startsAt >= endsAt`.
+- **Task 11** must assert the composition root wires the real redactor, not an
+  identity function; must strip `internalDetail` before serialising; and must
+  copy `schema.sql` alongside any compiled output.
 
 ## Open questions
 

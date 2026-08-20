@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": ["shared", "backend"],
   "scripts": {
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run build -w shared && npm run test --workspaces --if-present",
+    "typecheck": "npm run build -w shared && npm run typecheck --workspaces --if-present"
   }
 }

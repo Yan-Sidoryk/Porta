@@ -3,11 +3,17 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "types": "./src/api.ts",
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
   "exports": {
-    ".": "./src/api.ts"
+    ".": {
+      "types": "./dist/api.d.ts",
+      "default": "./dist/api.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

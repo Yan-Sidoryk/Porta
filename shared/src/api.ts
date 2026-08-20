@@ -30,6 +30,29 @@ export const LoginResponseSchema = z.object({
   refreshToken: z.string(),
 });
 
+export const RefreshRequestSchema = z.object({
+  refreshToken: z.string().min(1),
+});
+
+/** Owner-only. The window is ISO-8601; the backend parses it into Dates. */
+export const IssueGrantRequestSchema = z.object({
+  userId: z.string().min(1),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime(),
+});
+
+export const IssueGrantResponseSchema = z.object({
+  grantId: z.string(),
+});
+
+/** The shape of every non-2xx body the API returns. */
+export const ErrorResponseSchema = z.object({
+  ok: z.literal(false),
+  code: z.enum(ERROR_CODES),
+  message: z.string(),
+  retryAfterMs: z.number().int().nonnegative().optional(),
+});
+
 export const GateStatusResponseSchema = z.object({
   position: z.enum(GATE_POSITIONS),
   reachable: z.boolean(),
@@ -49,6 +72,10 @@ export type TriggerRequest = z.infer<typeof TriggerRequestSchema>;
 export type TriggerResponse = z.infer<typeof TriggerResponseSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+export type RefreshRequest = z.infer<typeof RefreshRequestSchema>;
+export type IssueGrantRequest = z.infer<typeof IssueGrantRequestSchema>;
+export type IssueGrantResponse = z.infer<typeof IssueGrantResponseSchema>;
+export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type GateStatusResponse = z.infer<typeof GateStatusResponseSchema>;
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 

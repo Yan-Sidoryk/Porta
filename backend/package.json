@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/infrastructure/db/schema.sql','dist/infrastructure/db/schema.sql')\"",
+    "start": "node --env-file=../.env dist/server.js",
+    "create-user": "node --env-file=../.env dist/scripts/create-user.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -11,7 +14,9 @@
     "@gate/shared": "*",
     "argon2": "^0.45.1",
     "better-sqlite3": "^13.0.3",
-    "jsonwebtoken": "^9.0.3"
+    "fastify": "^5.12.1",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

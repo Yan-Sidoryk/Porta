@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: Task 11 of 12 done (milestone 1–5 plan)
+## Status: Task 12 of 12 written; **the physical-phone check is still owed**
 
 Branch: `build/gate-opener-backend`
 
@@ -107,9 +107,46 @@ reported `reachable: false` in 39ms against an unresolvable host, the real
 `SqliteCommandGuard` answered a second tap with 409, the 500 body carried no
 `internalDetail`, and pino logged no bodies or headers at all.
 
+**Task 12 — Expo vertical slice.** Expo SDK 57, three source files:
+`App.tsx`, `src/api.ts`, `src/session.ts`. Tokens live in `expo-secure-store`,
+never `AsyncStorage`. The base URL is derived from Metro's `hostUri` instead of
+a hand-pasted LAN IP — the phone cannot resolve the dev machine's `localhost`,
+and an IP written into `app.json` goes stale with the next DHCP lease;
+`extra.apiUrl` overrides it and is what a real build sets. The idempotency key
+belongs to the tap, not to `trigger()`: one UUID per press, held until the
+backend gives a definite answer, so a retry after a network failure replays
+rather than sending a second pulse. CORS became a `buildApp` option defaulting
+to **off**, with a test either way — a shipped app is a native binary that
+sends no `Origin`, so production never needs it.
+
+`npm run stub-shelly -w backend` serves HTTPS with a certificate generated at
+startup and written to the temp directory, so no private key is committed and
+no verification step needs a real gate to move. It exists because the backend
+only ever builds `https://` URLs — `ShellyConfig.insecure` is still reachable
+only from the integration test, with no environment variable that can set it.
+
 ## Tested
 
-`npm test` at the root: **178 backend + 4 shared passing.**
+`npm test` at the root: **180 backend + 4 shared passing.** All three
+workspaces typecheck, `app` included.
+
+Task 12 was driven end to end against the stub, over real HTTP, with the
+compiled server: login, `reachable: true` (the first confirmation that the
+state adapter's `online` walk handles a realistic nested response), a
+`success` pulse, an identical key replaying as `replayed: true`, and a fresh
+key inside the window rejected 409 with `retryAfterMs: 4980`. **The stub logged
+three switch requests for five trigger calls** — the replay guard and the
+cooldown each stopped one at the wire, and the body was
+`{"id":"stub","channel":0,"on":true,"toggle_after":1}` exactly.
+
+One scare worth recording: a mid-sequence tap returned `success` where a
+cooldown rejection was expected. It was real seconds passing between two
+tool calls, not a defect — re-running both taps inside a single invocation
+gave the 409. Worth knowing before anyone else reads that as a bug.
+
+`npx expo export --platform android` bundles 606 modules, which is what proves
+the workspace module graph resolves (`@gate/shared` from `dist`, zod,
+expo-crypto). SDK 52+ needs no `metro.config.js` for monorepos.
 
 Every safety-critical invariant is proven by mutation — the test is shown
 failing against a deliberately broken implementation before it counts. This has
@@ -128,12 +165,36 @@ own: the auth-key-in-the-message check caught its own `expect.unreachable`, so
 it would have passed against a config that never threw at all. Rewritten to
 assert on the message.
 
+Task 12's one mutation: flipping `allowCors` to default `true` — caught by
+"sends no CORS headers by default", reverted.
+
 ## Next
 
-**Task 12** — the Expo vertical slice, login and trigger, on a **physical
-phone**. Expect three problems the plan already names: the device cannot
-resolve `localhost`, Android blocks cleartext HTTP by default, and the backend
-needs CORS for the dev client. The backend has no CORS plugin registered yet.
+**Task 12 step 6 is not done, and I could not do it.** Everything above was
+verified from this machine; steps 4 and 5 of that checklist need a phone in a
+hand. Plan two does not begin until this has run on a **physical device**, not
+a simulator. Four terminals from a clean checkout:
+
+```
+npm install && npm run build
+npm run stub-shelly -w backend          # prints SHELLY_HOST and NODE_EXTRA_CA_CERTS
+# put those two into .env, then:
+npm run create-user -w backend -- --email you@example.com --password '...' --role owner
+npm start -w backend
+npm start -w app                        # scan the QR code in Expo Go
+```
+
+What is still unproven, and what to watch for:
+
+- **Tokens actually landing in the keystore.** `expo-secure-store` is the one
+  module here that cannot be exercised off-device at all.
+- **Android cleartext HTTP.** Expo Go permits it, so the slice should just
+  work; a standalone dev build will not, and would need
+  `expo-build-properties` with `usesCleartextTraffic`. Not added — YAGNI until
+  someone builds one.
+- **The cooldown countdown on screen** is milestone 6, not this slice. Tapping
+  twice quickly shows the raw `retryAfterMs` as text, which is all step 6.6
+  asks for.
 
 Every constraint carried into Task 11 was discharged: `verifyPassword` is the
 real argon2id one, `POST /auth/logout` is a bare port call, both `Date` fields
@@ -142,12 +203,14 @@ into `dist/`, and `ShellyConfig.insecure` has no environment variable that can
 set it. The redactor wiring has its own test in `composition-root.test.ts`,
 asserted behaviourally — an identity function fails it.
 
-Carried forward into Task 12:
+Standing notes:
 
-- The backend serves `http://` in development by design; the phone will need
-  the LAN address in `PUBLIC_URL` and an Android cleartext exemption.
 - `npm test` at the root builds `shared/dist` first. `npm test -w backend`
   alone can run against a stale `@gate/shared` — use the root script.
+- `app/.claude/settings.json` arrived with the Expo template and enables an
+  Expo Claude plugin. Committed as scaffolded; delete it if unwanted.
+  `app/LICENSE` is template MIT and the repo has no root licence — worth a
+  decision before this goes anywhere public.
 
 ## Open questions
 
@@ -186,3 +249,6 @@ Task 12 has run on a **physical phone**, not a simulator.
 | `GET /access-grants` (list) not built | `SPEC.md` specifies issue and revoke only. |
 | `buildApp(container)`, not `buildApp(config)` as the plan wrote it | Taking the container is what lets `api.test.ts` run the whole HTTP layer against fakes. A `buildApp(config)` would construct the real Shelly adapter, and every test would be one bad mock away from moving a real gate. |
 | `create-user` lives at `backend/src/scripts/`, not `backend/scripts/` | Keeps it inside `rootDir: src`, so it compiles to `dist/scripts/create-user.js` with everything else instead of needing its own build config. |
+| CORS is a `buildApp` option, not a line in `server.ts` as the plan wrote it | "Off in production" is a security switch, and one that only exists in the entry point cannot be tested. `server.ts` still owns the decision; `buildApp` owns the behaviour, and both directions have a test. |
+| The API base URL comes from Metro's `hostUri`, not from `extra.apiUrl` in `app.json` | The plan's own reasoning, followed one step further: a phone cannot resolve the dev machine's `localhost`, and a hand-pasted LAN IP is stale the next time the router reassigns. `extra.apiUrl` still overrides, and is what a real build sets. |
+| No `metro.config.js` | Expo SDK 52+ configures Metro for monorepos itself; the documented config is now the *pre*-52 workaround. Proven by `expo export` bundling 606 modules. |

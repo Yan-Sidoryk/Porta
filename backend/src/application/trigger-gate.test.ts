@@ -3,6 +3,7 @@ import { TriggerGateUseCase } from './trigger-gate.js';
 import { RoleBasedAccessPolicy } from '../domain/access-policy.js';
 import { FakeAuditLog, FakeClock, FakeGateCommand, FakeGrantRepo, FakeGuard, FakeUserRepo } from '../../test/fakes.js';
 import type { User } from '../domain/user.js';
+import type { GateCommandPort, UserRepositoryPort } from '../domain/ports.js';
 
 const COOLDOWN = 5000;
 const KEY = '3f6d1c8e-9b2a-4c5d-8e1f-0a2b3c4d5e6f';
@@ -106,6 +107,45 @@ describe('TriggerGateUseCase', () => {
     await guard.tryClaim({ idempotencyKey: KEY, cooldownMs: COOLDOWN, idempotencyWindowMs: 60_000 });
     const r = await slow.execute('owner1', KEY);
     expect(r).toMatchObject({ ok: false, code: 'ATTEMPT_IN_PROGRESS' });
+    expect(gate.calls).toBe(0);
+  });
+
+  it('replays an identical key that previously failed, returning the original failure', async () => {
+    gate.setResult({ outcome: 'device-offline' });
+    const first = await useCase.execute('owner1', KEY);
+    expect(first).toMatchObject({ ok: false, code: 'DEVICE_OFFLINE', replayed: false });
+
+    gate.setResult({ outcome: 'success' }); // must not matter -- no second pulse should happen
+    const second = await useCase.execute('owner1', KEY);
+    expect(second).toMatchObject({ ok: false, code: 'DEVICE_OFFLINE', replayed: true });
+    expect(gate.calls).toBe(1);
+  });
+
+  it('returns INTERNAL and never releases the claim when the pulse call throws', async () => {
+    const throwingGate: GateCommandPort = {
+      pulse: () => { throw new Error('relay HTTP failure'); },
+    };
+    const uc = new TriggerGateUseCase(
+      new FakeUserRepo([owner]), new FakeGrantRepo([]),
+      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN,
+    );
+    const r = await uc.execute('owner1', KEY);
+    expect(r).toMatchObject({ ok: false, code: 'INTERNAL', replayed: false });
+    expect(guard.releaseCalls).toBe(0);
+  });
+
+  it('returns INTERNAL without pulsing when the user repository throws', async () => {
+    const throwingUsers: UserRepositoryPort = {
+      findById: () => { throw new Error('sqlite down'); },
+      findByEmail: async () => null,
+      create: async () => {},
+    };
+    const uc = new TriggerGateUseCase(
+      throwingUsers, new FakeGrantRepo([]),
+      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN,
+    );
+    const r = await uc.execute('owner1', KEY);
+    expect(r).toMatchObject({ ok: false, code: 'INTERNAL', replayed: false });
     expect(gate.calls).toBe(0);
   });
 });

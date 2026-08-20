@@ -5,6 +5,7 @@ import type {
 import type { ClaimResult, PulseResult } from '../src/domain/gate.js';
 import type { AccessGrant, User } from '../src/domain/user.js';
 import type { PulseOutcome } from '@gate/shared';
+import { UNCONFIRMED_COOLDOWN_MULTIPLIER } from '../src/domain/constants.js';
 
 export class FakeClock implements ClockPort {
   constructor(private current = new Date('2026-08-19T12:00:00Z')) {}
@@ -23,6 +24,8 @@ export class FakeGateCommand implements GateCommandPort {
 export class FakeGuard implements CommandGuardPort {
   private claims: { id: string; key: string; claimedAt: number; coolingUntil: number; outcome: PulseOutcome | null }[] = [];
   private seq = 0;
+  /** For tests: counts every call to release(), regardless of whether the claimId matched. */
+  releaseCalls = 0;
   constructor(private clock: FakeClock) {}
 
   async tryClaim(p: { idempotencyKey: string; cooldownMs: number; idempotencyWindowMs: number }): Promise<ClaimResult> {
@@ -37,16 +40,20 @@ export class FakeGuard implements CommandGuardPort {
     if (cooling) return { kind: 'cooling-down', retryAfterMs: cooling.coolingUntil - now };
 
     const id = `claim-${++this.seq}`;
-    this.claims.push({ id, key: p.idempotencyKey, claimedAt: now, coolingUntil: now + p.cooldownMs * 2, outcome: null });
+    this.claims.push({
+      id, key: p.idempotencyKey, claimedAt: now,
+      coolingUntil: now + p.cooldownMs * UNCONFIRMED_COOLDOWN_MULTIPLIER, outcome: null,
+    });
     return { kind: 'granted', claimId: id };
   }
 
   async release(claimId: string, outcome: PulseOutcome): Promise<void> {
+    this.releaseCalls += 1;
     const claim = this.claims.find((c) => c.id === claimId);
     if (!claim) return;
     claim.outcome = outcome;
     if (outcome !== 'timeout') {
-      claim.coolingUntil = claim.claimedAt + (claim.coolingUntil - claim.claimedAt) / 2;
+      claim.coolingUntil = claim.claimedAt + (claim.coolingUntil - claim.claimedAt) / UNCONFIRMED_COOLDOWN_MULTIPLIER;
     }
   }
 }

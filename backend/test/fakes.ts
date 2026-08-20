@@ -1,10 +1,11 @@
 import type {
   AccessGrantRepositoryPort, AuditEntry, AuditLogPort, ClockPort,
-  CommandGuardPort, GateCommandPort, UserRepositoryPort,
+  CommandGuardPort, GateCommandPort, GateStatePort, TokenServicePort,
+  UserRepositoryPort,
 } from '../src/domain/ports.js';
-import type { ClaimResult, PulseResult } from '../src/domain/gate.js';
+import type { ClaimResult, GateState, PulseResult } from '../src/domain/gate.js';
 import type { AccessGrant, User } from '../src/domain/user.js';
-import type { PulseOutcome } from '@gate/shared';
+import type { PulseOutcome, Role } from '@gate/shared';
 import { UNCONFIRMED_COOLDOWN_MULTIPLIER } from '../src/domain/constants.js';
 
 export class FakeClock implements ClockPort {
@@ -58,6 +59,53 @@ export class FakeGuard implements CommandGuardPort {
     if (outcome !== 'timeout') {
       claim.coolingUntil = claim.claimedAt + (claim.coolingUntil - claim.claimedAt) / UNCONFIRMED_COOLDOWN_MULTIPLIER;
     }
+  }
+}
+
+export class FakeGateState implements GateStatePort {
+  /** An Error here is thrown instead of returned -- adapters do fail. */
+  constructor(private result: GateState | Error = { position: 'unknown', reachable: true, checkedAt: new Date(0) }) {}
+  setResult(r: GateState | Error): void { this.result = r; }
+  async getState(): Promise<GateState> {
+    if (this.result instanceof Error) throw this.result;
+    return this.result;
+  }
+}
+
+/**
+ * Mirrors JwtTokenService where it matters: a refresh token is single-use and
+ * revoking a user's tokens invalidates the ones already handed out. Access
+ * tokens are plain strings -- signature checking is the real service's job and
+ * is tested against it directly in infrastructure/auth.test.ts.
+ */
+export class FakeTokenService implements TokenServicePort {
+  revokedFor: string[] = [];
+  private live = new Map<string, string>();
+  private seq = 0;
+
+  issueAccessToken(userId: string, role: Role): string { return `access:${userId}:${role}`; }
+
+  verifyAccessToken(token: string): { userId: string; role: Role } | null {
+    const [prefix, userId, role] = token.split(':');
+    return prefix === 'access' && userId && role ? { userId, role: role as Role } : null;
+  }
+
+  async issueRefreshToken(userId: string): Promise<string> {
+    const raw = `refresh:${userId}:${++this.seq}`;
+    this.live.set(raw, userId);
+    return raw;
+  }
+
+  async consumeRefreshToken(token: string): Promise<{ userId: string } | null> {
+    const userId = this.live.get(token);
+    if (!userId) return null;
+    this.live.delete(token); // single-use, like the real one
+    return { userId };
+  }
+
+  async revokeRefreshTokensFor(userId: string): Promise<void> {
+    this.revokedFor.push(userId);
+    for (const [raw, owner] of this.live) if (owner === userId) this.live.delete(raw);
   }
 }
 

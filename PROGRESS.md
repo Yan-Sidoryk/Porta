@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: Task 10 of 12 done (milestone 1–5 plan)
+## Status: Task 11 of 12 done (milestone 1–5 plan)
 
 Branch: `build/gate-opener-backend`
 
@@ -90,9 +90,26 @@ Grants are owner-only and reject a window that cannot grant anything.
 `ListAuditEvents` rebuilds each row field by field, so `detail` (a redacted
 stack trace) cannot reach a client even if `AuditEntry` grows a field.
 
+**Task 11 — config, composition root, API routes, `create-user` CLI.** The
+process refuses to boot without every secret, or in production behind a plain
+`http://` `PUBLIC_URL`; the thrown message names the variable and never prints
+its value. Routes rebuild every response field by field rather than spreading
+a use-case result — `TriggerResult` carries `internalDetail`, a raw adapter
+error whose text can hold the auth key. `USER_UNKNOWN` and `USER_DISABLED`
+reach the client as `ACCESS_DENIED`, same status and same body, so no endpoint
+answers "does this account exist". `@gate/shared` gained a build step:
+`server.ts` is the first thing to run under plain `node`, which cannot resolve
+raw `.ts` out of `node_modules`.
+
+Verified against the compiled output, not just the tests: `create-user` made
+an account, the server booted, login returned a token pair, `/gate/status`
+reported `reachable: false` in 39ms against an unresolvable host, the real
+`SqliteCommandGuard` answered a second tap with 409, the 500 body carried no
+`internalDetail`, and pino logged no bodies or headers at all.
+
 ## Tested
 
-`npm test` at the root: **145 backend + 4 shared passing.**
+`npm test` at the root: **178 backend + 4 shared passing.**
 
 Every safety-critical invariant is proven by mutation — the test is shown
 failing against a deliberately broken implementation before it counts. This has
@@ -101,29 +118,49 @@ accident, a window test with a six-hour gap that made an off-by-one
 undetectable, and a boundary test that caught none of the three import shapes it
 claimed to.
 
+Task 11's four mutations, each reverted after the named test was watched
+failing: spreading the use-case result into the response (the auth key appeared
+in the 500 body verbatim — the failure output is the proof), wiring `(s) => s`
+as the redactor, emptying the `USER_UNKNOWN → ACCESS_DENIED` map, and letting
+`authGuard` fall through to an anonymous user (which served `/gate/status` a
+200 and logged people out on a 204). Writing them also exposed a bad test of my
+own: the auth-key-in-the-message check caught its own `expect.unreachable`, so
+it would have passed against a config that never threw at all. Rewritten to
+assert on the message.
+
 ## Next
 
-**Task 11** — config, composition root, API routes, and the `create-user` CLI.
-Then the Expo vertical slice on a physical phone (12).
+**Task 12** — the Expo vertical slice, login and trigger, on a **physical
+phone**. Expect three problems the plan already names: the device cannot
+resolve `localhost`, Android blocks cleartext HTTP by default, and the backend
+needs CORS for the dev client. The backend has no CORS plugin registered yet.
 
-Carried forward into later tasks (full detail in the ledger):
+Every constraint carried into Task 11 was discharged: `verifyPassword` is the
+real argon2id one, `POST /auth/logout` is a bare port call, both `Date` fields
+serialise as ISO strings, `internalDetail` is stripped, `schema.sql` is copied
+into `dist/`, and `ShellyConfig.insecure` has no environment variable that can
+set it. The redactor wiring has its own test in `composition-root.test.ts`,
+asserted behaviourally — an identity function fails it.
 
-- **Task 11** must pass infrastructure's `verifyPassword` into
-  `AuthenticateUserUseCase` — it takes a plain function, so wiring a stub
-  there silently accepts every password.
-- **Task 11** owns `POST /auth/logout`: there is no use case for it, just
-  `TokenServicePort.revokeRefreshTokensFor`.
-- **Task 11** serialises `GateState.checkedAt` and `AuditEventView.createdAt`
-  as ISO strings; both use cases return real `Date`s.
-- **Task 11** must assert the composition root wires the real redactor, not an
-  identity function; must strip `internalDetail` before serialising; and must
-  copy `schema.sql` alongside any compiled output. It must also leave
-  `ShellyConfig.insecure` unset — it exists only so the stub server can be
-  reached over `http://127.0.0.1`.
+Carried forward into Task 12:
+
+- The backend serves `http://` in development by design; the phone will need
+  the LAN address in `PUBLIC_URL` and an Android cleartext exemption.
+- `npm test` at the root builds `shared/dist` first. `npm test -w backend`
+  alone can run against a stale `@gate/shared` — use the root script.
 
 ## Open questions
 
 None blocking.
+
+Known gap, found during Task 11's smoke test, **not** fixed — it belongs to
+Task 4 and the spec does not require it: `PulseResult.detail` is documented as
+"for the audit log only", but `toResult` discards it, so a failed pulse audits
+as `failed / DEVICE_OFFLINE` with `detail` null. Only a *thrown* adapter error
+reaches the audit row (as `internalDetail`). SPEC.md asks for user, timestamp,
+outcome and error code, and all four are recorded, so this is lost diagnostic
+text rather than a missing requirement. Worth three lines in `trigger-gate.ts`
+whenever that file is next opened.
 
 Known gap, accepted: `FakeTokenService` mirrors `JwtTokenService`'s single-use
 refresh semantics but no shared contract test binds them, as `CommandGuardPort`
@@ -147,3 +184,5 @@ Task 12 has run on a **physical phone**, not a simulator.
 | No signup endpoint; accounts via `create-user` CLI only | `SPEC.md` requires "how to add the first user" but defines no route. A CLI is the smaller attack surface for a door opener. |
 | HTTPS enforced via a required `https://` `PUBLIC_URL`, not by terminating TLS in Node | TLS belongs at the reverse proxy. The process still refuses to boot without it. |
 | `GET /access-grants` (list) not built | `SPEC.md` specifies issue and revoke only. |
+| `buildApp(container)`, not `buildApp(config)` as the plan wrote it | Taking the container is what lets `api.test.ts` run the whole HTTP layer against fakes. A `buildApp(config)` would construct the real Shelly adapter, and every test would be one bad mock away from moving a real gate. |
+| `create-user` lives at `backend/src/scripts/`, not `backend/scripts/` | Keeps it inside `rootDir: src`, so it compiles to `dist/scripts/create-user.js` with everything else instead of needing its own build config. |

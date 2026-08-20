@@ -156,6 +156,22 @@ describe('POST /gate/trigger', () => {
     expect(res.json()).not.toHaveProperty('internalDetail');
   });
 
+  // Not just the 500 path: every failed pulse now carries the adapter's own
+  // detail out for the audit log, so every failure body is a leak candidate.
+  it('never leaks the adapter detail on a device failure either', async () => {
+    const SECRET = 'OFFLINE' + 'SECRETKEY456';
+    gate.setResult({
+      outcome: 'device-offline',
+      detail: `HTTP 502 https://shelly.example/v2/x?auth_key=${SECRET}`,
+    });
+
+    const res = await trigger(owner, KEY);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body).not.toContain(SECRET);
+    expect(res.json()).not.toHaveProperty('internalDetail');
+  });
+
   it('gives an unknown user the same answer as a denied one', async () => {
     const ghost: User = { ...owner, id: 'ghost', role: 'owner' };
     const denied = await trigger(guest, KEY); // real user, no grant

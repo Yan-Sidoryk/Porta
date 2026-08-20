@@ -4,11 +4,20 @@ import { shellyPost, type ShellyConfig } from './client.js';
 
 /**
  * Walks the response looking for this device's `online` flag. Shelly's v2
- * `get` nests it (`data.devices_status.<id>.online`), but the exact depth is
- * the one thing here that cannot be verified without calling the real API --
- * and every real call moves a real gate. So: search rather than assume.
- * ponytail: unverified nesting, replace the walk with a direct path once the
- * live shape is confirmed by hand.
+ * `get` nests it (`data.devices_status.<id>.online`), but the exact depth
+ * could not be verified without calling the real API. So: search rather than
+ * assume.
+ *
+ * CONFIRMED against real hardware (2026-08-21): reports true for a powered
+ * device and false for an unplugged one. Note that this proved the walk
+ * *works*, not where the flag lives -- the search finds it without reporting
+ * the path.
+ *
+ * ponytail: the search is loose by construction. It returns true if `online`
+ * is truthy ANYWHERE in the response, and the false-positive direction is the
+ * bad one -- claiming the gate is reachable when it is not. Only one device id
+ * is ever requested, so nothing else should be in there today. Replace with a
+ * direct path once `npm run probe-shelly -w backend` has shown the real shape.
  */
 function findOnline(node: unknown, deviceId: string): boolean {
   if (typeof node !== 'object' || node === null) return false;

@@ -35,10 +35,27 @@ const OUTCOME_TO_CODE: Record<Exclude<PulseOutcome, 'success'>, ErrorCode> = {
   error: 'INTERNAL',
 };
 
-const toResult = (outcome: PulseOutcome, replayed: boolean): TriggerResult =>
+/**
+ * `detail` is the adapter's own account of why a pulse failed -- Shelly's
+ * error body, or the network error text. It travels out on `internalDetail`,
+ * the field the auditing decorator redacts and persists and the API layer
+ * drops, so it reaches the audit log and nothing else. Without it an audit row
+ * reads `failed / DEVICE_OFFLINE` and nothing more, which is not enough to
+ * tell a dropped pillar Wi-Fi from a rejected auth key at 2am.
+ */
+const toResult = (
+  outcome: PulseOutcome,
+  replayed: boolean,
+  detail?: string,
+): TriggerResult =>
   outcome === 'success'
     ? { ok: true, outcome, replayed }
-    : { ok: false, code: OUTCOME_TO_CODE[outcome], replayed };
+    : {
+        ok: false,
+        code: OUTCOME_TO_CODE[outcome],
+        replayed,
+        ...(detail === undefined ? {} : { internalDetail: detail }),
+      };
 
 export class TriggerGateUseCase implements TriggerGate {
   constructor(
@@ -88,7 +105,7 @@ export class TriggerGateUseCase implements TriggerGate {
       // its full pessimistic 2x window rather than being narrowed or freed.
       const result = await this.gate.pulse();
       await this.guard.release(claim.claimId, result.outcome);
-      return toResult(result.outcome, false);
+      return toResult(result.outcome, false, result.detail);
     } catch (err) {
       // Adapter failure (SQLite, HTTP, etc). Never let a raw exception cross
       // the layer boundary; never release a claim here -- see the note above.

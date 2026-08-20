@@ -8,7 +8,7 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: Task 12 of 12 written; **the physical-phone check is still owed**
+## Status: plan one complete (12 of 12), verified on a physical phone
 
 Branch: `build/gate-opener-backend`
 
@@ -127,7 +127,7 @@ only from the integration test, with no environment variable that can set it.
 
 ## Tested
 
-`npm test` at the root: **180 backend + 4 shared passing.** All three
+`npm test` at the root: **183 backend + 4 shared passing.** All three
 workspaces typecheck, `app` included.
 
 Task 12 was driven end to end against the stub, over real HTTP, with the
@@ -170,31 +170,35 @@ Task 12's one mutation: flipping `allowCors` to default `true` — caught by
 
 ## Next
 
-**Task 12 step 6 is not done, and I could not do it.** Everything above was
-verified from this machine; steps 4 and 5 of that checklist need a phone in a
-hand. Plan two does not begin until this has run on a **physical device**, not
-a simulator. Four terminals from a clean checkout:
+**Plan one is complete. Milestone 6 is next.**
 
-```
-npm install && npm run build
-npm run stub-shelly -w backend          # prints SHELLY_HOST and NODE_EXTRA_CA_CERTS
-# put those two into .env, then:
-npm run create-user -w backend -- --email you@example.com --password '...' --role owner
-npm start -w backend
-npm start -w app                        # scan the QR code in Expo Go
-```
+Task 12 step 6 ran on a **physical phone** on 2026-08-21, against the real
+Shelly relay powered on a bench with nothing wired to its I/O terminals — so
+the relay clicked audibly and no gate could move. All of it passed:
 
-What is still unproven, and what to watch for:
+- create-user, login, and a wrong password refused
+- `reachable: false` unplugged, `true` plugged in
+- one tap → `success` and an audible click
+- an immediate second tap → 409 `GATE_COOLING_DOWN` with `retryAfterMs`, **no
+  second click** — the safety mechanism proving itself on real hardware
+- a third tap after the window → success again
 
-- **Tokens actually landing in the keystore.** `expo-secure-store` is the one
-  module here that cannot be exercised off-device at all.
-- **Android cleartext HTTP.** Expo Go permits it, so the slice should just
-  work; a standalone dev build will not, and would need
-  `expo-build-properties` with `usesCleartextTraffic`. Not added — YAGNI until
-  someone builds one.
-- **The cooldown countdown on screen** is milestone 6, not this slice. Tapping
-  twice quickly shows the raw `retryAfterMs` as text, which is all step 6.6
-  asks for.
+Two things that test settled beyond its checklist. Tokens really do reach the
+keystore: `api.ts` keeps no token in memory and re-reads `expo-secure-store` on
+every authenticated call, so "Check status" working *is* the proof. And the
+reachability walk was confirmed against the live API in both directions (see
+the open item below for what that did not prove).
+
+Also observed, and normal: an unplugged relay kept reporting `reachable: true`
+for about a minute before flipping to false. Shelly Cloud only marks a device
+offline once its keepalive expires, so **`reachable` is a lagging indicator** —
+it can describe a device that is already dead. This is why every status
+response carries `checkedAt`, and another reason the no-retry rule exists.
+
+Not carried forward, and deliberately: **Android cleartext HTTP** never became
+a problem because Expo Go permits it. A standalone dev build would need
+`expo-build-properties` with `usesCleartextTraffic`; not added until someone
+builds one.
 
 Every constraint carried into Task 11 was discharged: `verifyPassword` is the
 real argon2id one, `POST /auth/logout` is a bare port call, both `Date` fields
@@ -207,30 +211,64 @@ Standing notes:
 
 - `npm test` at the root builds `shared/dist` first. `npm test -w backend`
   alone can run against a stale `@gate/shared` — use the root script.
-- `app/.claude/settings.json` arrived with the Expo template and enables an
-  Expo Claude plugin. Committed as scaffolded; delete it if unwanted.
-  `app/LICENSE` is template MIT and the repo has no root licence — worth a
-  decision before this goes anywhere public.
+- `*.db*` is gitignored, which matters: SQLite runs in WAL mode, and
+  `gate.db-wal` holds committed data while `gate.db-shm` coordinates access to
+  it. A bare `*.db` pattern catches neither.
 
 ## Open questions
 
 None blocking.
 
-Known gap, found during Task 11's smoke test, **not** fixed — it belongs to
-Task 4 and the spec does not require it: `PulseResult.detail` is documented as
-"for the audit log only", but `toResult` discards it, so a failed pulse audits
-as `failed / DEVICE_OFFLINE` with `detail` null. Only a *thrown* adapter error
-reaches the audit row (as `internalDetail`). SPEC.md asks for user, timestamp,
-outcome and error code, and all four are recorded, so this is lost diagnostic
-text rather than a missing requirement. Worth three lines in `trigger-gate.ts`
-whenever that file is next opened.
+**FIXED (2026-08-21).** `PulseResult.detail` was documented as "for the audit
+log only" but `toResult` discarded it, so a failed pulse audited as
+`failed / DEVICE_OFFLINE` with `detail` null. It now travels out on
+`internalDetail`, which the decorator redacts and persists and the API layer
+drops. Two tests cover it — one on the field, one across the whole join from
+adapter to audit row — and both were watched failing against a `toResult` that
+drops it again. The fix widened *which* responses carry `internalDetail`, so
+`api.test.ts` gained a leak test on a 502 as well as the existing 500.
 
-Known gap, accepted: `FakeTokenService` mirrors `JwtTokenService`'s single-use
-refresh semantics but no shared contract test binds them, as `CommandGuardPort`
-has. Judged tolerable because single-use is proven directly against the real
-implementation and no use-case logic depends on the fake's replay behaviour —
-`RefreshSessionUseCase` only distinguishes null from non-null. Revisit if a
-second implementation appears.
+**Known gap, accepted — `FakeTokenService` has no shared contract test.**
+Unlike `CommandGuardPort`, nothing binds it to `JwtTokenService`, so the two
+can drift and the auth tests would keep passing while describing a service that
+does not exist. Tolerated because single-use is proven directly against the
+real implementation and `RefreshSessionUseCase` only distinguishes null from
+non-null — no use-case logic depends on the fake's replay behaviour.
+
+> **Revisit trigger, decided 2026-08-21:** write the contract test (mirroring
+> `test/command-guard-contract.ts`) as soon as **either** `TokenServicePort`
+> gains a method **or** a second real implementation appears — Redis-backed
+> sessions, say. The same note is in `test/fakes.ts`, above the class, where
+> whoever is about to break it will actually see it.
+
+**Open, needs one command on real hardware — the reachability walk.**
+`findOnline` in `state-adapter.ts` searches the Shelly response for `online`
+at any depth instead of reading a known path. Physical testing on 2026-08-21
+confirmed it works in both directions, so the old "unverified" comment was
+retired — but that proved the walk *works*, not *where the flag lives*, since
+the search finds it without reporting the path.
+
+It stays loose until someone pins the path: it returns true if `online` is
+truthy anywhere in the response, and the false-positive direction is the
+dangerous one, claiming the gate is reachable when it is not. Only one device
+id is ever requested, so nothing else should be in the payload today.
+
+> **To close it:** run `npm run probe-shelly -w backend` with the relay
+> powered — read-only, it calls `get` and never `set/switch`, so it cannot
+> move a gate — then replace the walk with the exact path from the output.
+
+**Licensing, decided 2026-08-21.** `app/LICENSE` — an MIT grant the Expo
+template dropped into a subdirectory — was **deleted**. The repo has no root
+licence, so the project is unlicensed: all rights reserved, which is the right
+default for software that opens a front gate. A stray MIT grant covering one
+folder was misleading either way it was read. **If this is ever published, add
+a considered licence at the repository root then.**
+
+`app/.claude/settings.json` and `app/AGENTS.md` / `app/CLAUDE.md` were kept.
+The plugin config is low-risk and scoped, and the two-line agent instruction to
+read version-pinned Expo docs has already earned its keep: it is why the SDK
+docs were fetched rather than written from memory, immediately before the
+Expo Go SDK 54 ceiling turned up.
 
 ## Deferred to a second plan
 

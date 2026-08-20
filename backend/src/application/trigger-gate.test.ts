@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TriggerGateUseCase } from './trigger-gate.js';
+import { AuditedTriggerGate } from './audited-trigger.js';
 import { RoleBasedAccessPolicy } from '../domain/access-policy.js';
+import { redact } from '../infrastructure/redact.js';
 import { FakeAuditLog, FakeClock, FakeGateCommand, FakeGrantRepo, FakeGuard, FakeUserRepo } from '../../test/fakes.js';
 import type { User } from '../domain/user.js';
 import type { GateCommandPort, UserRepositoryPort } from '../domain/ports.js';
@@ -149,6 +151,35 @@ describe('TriggerGateUseCase', () => {
     if (r.ok) throw new Error('expected a failure result');
     expect(r.internalDetail).toBeDefined();
     expect(r.internalDetail).toContain('boom');
+  });
+
+  it('carries a FAILED pulse\'s adapter detail out on internalDetail', async () => {
+    const detail = 'HTTP 502 {"error":"DEVICE_OFFLINE","data":{"messages":["offline"]}}';
+    gate.setResult({ outcome: 'device-offline', detail });
+
+    const r = await useCase.execute('owner1', KEY);
+
+    expect(r).toMatchObject({ ok: false, code: 'DEVICE_OFFLINE' });
+    if (r.ok) throw new Error('expected a failure result');
+    // Without this the audit row reads `failed / DEVICE_OFFLINE` and nothing
+    // else -- not enough to tell a dropped pillar Wi-Fi from a rejected key.
+    expect(r.internalDetail).toBe(detail);
+  });
+
+  it('lands that detail in the audit log, redacted, when wrapped', async () => {
+    // The whole point of the field, proven across the join rather than in
+    // either half: adapter -> use case -> decorator -> audit row.
+    const log = new FakeAuditLog();
+    gate.setResult({
+      outcome: 'device-offline',
+      detail: 'GET https://shelly.example/v2/x?auth_key=SUPERSECRET failed: offline',
+    });
+    const audited = new AuditedTriggerGate(useCase, log, clock, redact);
+
+    await audited.execute('owner1', KEY);
+
+    expect(log.entries[0]?.detail).toContain('offline');
+    expect(log.entries[0]?.detail).not.toContain('SUPERSECRET');
   });
 
   it('returns INTERNAL without pulsing when the user repository throws', async () => {

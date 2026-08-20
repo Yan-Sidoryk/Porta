@@ -8,6 +8,7 @@
     "start": "node --env-file=../.env dist/server.js",
     "create-user": "node --env-file=../.env dist/scripts/create-user.js",
     "stub-shelly": "node dist/scripts/stub-shelly.js",
+    "probe-shelly": "node --env-file=../.env dist/scripts/probe-shelly.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

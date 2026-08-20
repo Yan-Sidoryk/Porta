@@ -77,6 +77,17 @@ export class FakeGateState implements GateStatePort {
  * revoking a user's tokens invalidates the ones already handed out. Access
  * tokens are plain strings -- signature checking is the real service's job and
  * is tested against it directly in infrastructure/auth.test.ts.
+ *
+ * ACCEPTED GAP: unlike CommandGuardPort, no shared contract test binds this to
+ * JwtTokenService, so the two can drift. Tolerated because single-use is
+ * proven directly against the real implementation, and RefreshSessionUseCase
+ * only distinguishes null from non-null -- no use-case logic depends on the
+ * replay behaviour asserted here.
+ *
+ * Write the contract test (mirror test/command-guard-contract.ts) if either
+ * happens: TokenServicePort gains a method, or a second real implementation
+ * appears. Until then, changing the semantics below without changing
+ * JwtTokenService makes the auth tests describe a service that does not exist.
  */
 export class FakeTokenService implements TokenServicePort {
   revokedFor: string[] = [];

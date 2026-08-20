@@ -30,6 +30,8 @@ export interface AuditEntry {
   errorCode: ErrorCode | null;
   idempotencyKey: string | null;
   createdAt: Date;
+  /** Redacted diagnostic detail for a failure (never raw -- see infrastructure/redact.ts). */
+  detail: string | null;
 }
 
 /** Append-only. Never queried for safety decisions -- that is CommandGuardPort. */

@@ -1,6 +1,6 @@
 .env
 node_modules/
 dist/
-*.db
+*.db*
 *.sqlite
 .expo/

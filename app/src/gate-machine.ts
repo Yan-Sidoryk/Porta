@@ -157,6 +157,40 @@ export const shouldRelock = (
   graceMs: number = RELOCK_GRACE_MS,
 ): boolean => backgroundedAt !== null && now - backgroundedAt >= graceMs;
 
+const pad = (value: number): string => String(value).padStart(2, '0');
+
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/**
+ * Clock time in the phone's local zone.
+ *
+ * Built by hand rather than with toLocaleTimeString: the setting has to decide
+ * 12- or 24-hour, and the platform would otherwise override it from the device
+ * locale. It also makes the output identical on every device, which is what
+ * you want when comparing an audit row against someone's account of when they
+ * arrived.
+ */
+export function formatClock(iso: string, use24h: boolean): string {
+  const at = new Date(iso);
+  const hours = at.getHours();
+  const minutes = pad(at.getMinutes());
+
+  if (use24h) return `${pad(hours)}:${minutes}`;
+
+  const suffix = hours < 12 ? 'am' : 'pm';
+  const twelve = hours % 12 === 0 ? 12 : hours % 12;
+  return `${twelve}:${minutes} ${suffix}`;
+}
+
+/** Date plus time, for log rows that may be days old. */
+export function formatStamp(iso: string, use24h: boolean): string {
+  const at = new Date(iso);
+  return `${at.getDate()} ${MONTHS[at.getMonth()] ?? ''} ${formatClock(iso, use24h)}`;
+}
+
 /** Whole seconds still to wait, floor 0. What the ring counts down. */
 export const secondsLeft = (until: number, now: number): number =>
   Math.max(0, Math.ceil((until - now) / 1000));

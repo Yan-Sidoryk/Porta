@@ -1,9 +1,10 @@
 import { Text, View } from 'react-native';
-import type { ControllerView } from '../gate-machine';
+import { formatClock, type ControllerView } from '../gate-machine';
 import { colors, space, type as typography } from '../theme';
 
 interface Props {
   view: ControllerView;
+  use24h: boolean;
 }
 
 /**
@@ -22,32 +23,29 @@ interface Props {
  *
  * Reachability also LAGS -- Shelly Cloud only marks a device offline once its
  * keepalive expires, up to about a minute -- so the time of the reading sits
- * next to it rather than being implied.
+ * on the same line rather than being implied.
  */
-export function StatusPanel({ view }: Props) {
+export function StatusPanel({ view, use24h }: Props) {
   const { dot, headline } = present(view);
 
   return (
-    <View style={{ gap: space.sm }}>
+    <View style={{ gap: space.xs }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         {/* Colour is never the only carrier: the words say it too, for
             colour-blind readers and for a screen glanced at in sunlight. */}
-        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: dot }} />
-        {/* Subordinate to the app name above it: this line changes, the name
-            does not, and the button below is what the eye should land on. */}
-        <Text
-          numberOfLines={1}
-          style={{ ...typography.title, color: colors.text, flexShrink: 1 }}
-        >
+        <View style={{ width: 9, height: 9, borderRadius: 4.5, backgroundColor: dot }} />
+        <Text numberOfLines={1} style={{ ...typography.body, color: colors.text }}>
           {headline}
         </Text>
-      </View>
 
-      {view.kind === 'online' || view.kind === 'offline' ? (
-        <Text style={{ ...typography.small, color: colors.textDim }}>
-          Checked {new Date(view.checkedAt).toLocaleTimeString()}
-        </Text>
-      ) : null}
+        {view.kind === 'online' || view.kind === 'offline' ? (
+          // Pushed to the far end of the same line: it qualifies the reading,
+          // so it belongs beside it rather than on a row of its own.
+          <Text style={{ ...typography.small, color: colors.textDim, marginLeft: 'auto' }}>
+            {formatClock(view.checkedAt, use24h)}
+          </Text>
+        ) : null}
+      </View>
 
       {view.kind === 'unreadable' ? (
         <Text style={{ ...typography.small, color: colors.textDim }}>

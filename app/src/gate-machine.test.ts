@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canTap, controllerView, cooldownProgress, messageFor, nextState, secondsLeft,
-  shouldRelock, tapIsFinished, type GateUiState,
+  canTap, controllerView, cooldownProgress, formatClock, formatStamp, messageFor,
+  nextState, secondsLeft, shouldRelock, tapIsFinished, type GateUiState,
 } from './gate-machine';
 
 const NOW = 1_700_000_000_000;
@@ -64,6 +64,31 @@ describe('nextState', () => {
   it('reports an unreachable backend distinctly from a denied one', () => {
     expect(messageFor('NETWORK_UNREACHABLE')).not.toBe(messageFor('ACCESS_DENIED'));
     expect(messageFor('NETWORK_UNREACHABLE')).toMatch(/connection|signal|wi-?fi/i);
+  });
+});
+
+describe('clock formatting', () => {
+  // Built from local components so the assertions hold in any timezone.
+  const at = (h: number, m: number): string => new Date(2026, 7, 21, h, m).toISOString();
+
+  it('pads to a fixed width in 24-hour mode', () => {
+    expect(formatClock(at(14, 32), true)).toBe('14:32');
+    expect(formatClock(at(9, 5), true)).toBe('09:05');
+  });
+
+  it('turns midnight and noon into 12, not 0', () => {
+    expect(formatClock(at(0, 15), false)).toBe('12:15 am');
+    expect(formatClock(at(12, 15), false)).toBe('12:15 pm');
+  });
+
+  it('wraps the afternoon back to 1-11', () => {
+    expect(formatClock(at(13, 0), false)).toBe('1:00 pm');
+    expect(formatClock(at(23, 45), false)).toBe('11:45 pm');
+  });
+
+  it('puts the date in front for log rows', () => {
+    expect(formatStamp(at(14, 32), true)).toBe('21 Aug 14:32');
+    expect(formatStamp(at(14, 32), false)).toBe('21 Aug 2:32 pm');
   });
 });
 

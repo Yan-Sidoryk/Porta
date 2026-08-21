@@ -1,9 +1,11 @@
 import { Text, View } from 'react-native';
 import type { AuditEvent } from '@gate/shared';
+import { formatStamp } from '../gate-machine';
 import { colors, space, type as typography } from '../theme';
 
 interface Props {
   events: AuditEvent[];
+  use24h: boolean;
 }
 
 /**
@@ -59,7 +61,7 @@ const describe = (event: AuditEvent): string => {
  * navigation -- it is glanced at, not browsed, and a router for a second view
  * is a dependency that never leaves.
  */
-export function ActivityList({ events }: Props) {
+export function ActivityList({ events, use24h }: Props) {
   if (events.length === 0) {
     return (
       <Text style={{ ...typography.small, color: colors.textDim }}>
@@ -94,7 +96,7 @@ export function ActivityList({ events }: Props) {
             </Text>
           </View>
           <Text style={{ ...typography.small, color: colors.textDim }}>
-            {new Date(event.createdAt).toLocaleString()}
+            {formatStamp(event.createdAt, use24h)}
           </Text>
         </View>
       ))}

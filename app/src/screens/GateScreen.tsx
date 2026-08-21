@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
+import { Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import type { AuditEvent, GateStatusResponse } from '@gate/shared';
@@ -16,6 +16,7 @@ import { SettingsMenu } from '../components/SettingsMenu';
 import {
   authenticate, checkAvailability, isLockEnabled, setLockEnabled, type Availability,
 } from '../biometrics';
+import { getUse24h, setUse24h } from '../settings';
 import { colors, space, type as typography } from '../theme';
 
 interface Props {
@@ -91,11 +92,21 @@ export function GateScreen({ onSignedOut }: Props) {
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [togglingLock, setTogglingLock] = useState(false);
 
+  const [use24h, setUse24hState] = useState(true);
+
   // Read once. Hardware and enrolment do not change while the app is open.
   useEffect(() => {
     void checkAvailability().then(setAvailability);
     void isLockEnabled().then(setBiometricOn);
+    void getUse24h().then(setUse24hState);
   }, []);
+
+  const toggle24h = (next: boolean): void => {
+    // Applied immediately and persisted behind it: a clock format is not
+    // worth making someone wait on the keystore.
+    setUse24hState(next);
+    void setUse24h(next);
+  };
 
   const openMenu = (): void => setMenuOpen(true);
 
@@ -236,6 +247,8 @@ export function GateScreen({ onSignedOut }: Props) {
       biometricBlockedReason={availability && !availability.available ? availability.reason : null}
       busy={togglingLock}
       onToggleBiometric={(next) => { void toggleBiometric(next); }}
+      use24h={use24h}
+      onToggle24h={toggle24h}
       onSignOut={() => {
         setMenuOpen(false);
         void logout().finally(onSignedOut);
@@ -268,6 +281,11 @@ export function GateScreen({ onSignedOut }: Props) {
         {/* The name and the menu share the top line; the controller reading
             sits under them, smaller, because it changes and the name does not. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Image
+            source={require('../../assets/logo.png')}
+            accessibilityIgnoresInvertColors
+            style={{ width: 34, height: 34, borderRadius: 8 }}
+          />
           <Text style={{ ...typography.hero, color: colors.text, flex: 1 }}>Porta</Text>
           <Pressable
             onPress={openMenu}
@@ -280,7 +298,7 @@ export function GateScreen({ onSignedOut }: Props) {
           </Pressable>
         </View>
 
-        <StatusPanel view={controllerView(reading)} />
+        <StatusPanel view={controllerView(reading)} use24h={use24h} />
       </View>
 
       <Banner message={banner} />
@@ -299,7 +317,7 @@ export function GateScreen({ onSignedOut }: Props) {
 
       <View style={{ gap: space.sm }}>
         <Text style={{ ...typography.title, color: colors.text }}>Recent activity</Text>
-        <ActivityList events={events} />
+        <ActivityList events={events} use24h={use24h} />
       </View>
 
     </ScrollView>
@@ -335,3 +353,4 @@ function Banner({ message }: { message: BannerMessage | null }) {
     </View>
   );
 }
+

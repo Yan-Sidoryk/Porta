@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, Keyboard, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Image, KeyboardAvoidingView, Platform,
   Pressable, ScrollView, Text, TextInput, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,14 +15,8 @@ interface Props {
 /** Breathing room between the focused field and the top of the keyboard. */
 const KEYBOARD_GAP = 48;
 
-/** The mark at rest, and once the keyboard has taken the screen. */
-const LOGO_LARGE = 96;
-const LOGO_SMALL = 34;
-const TITLE_LARGE = 44;
-const TITLE_SMALL = 34;
-
-/** Long enough to read as movement, short enough not to lag the keyboard. */
-const COLLAPSE_MS = 220;
+/** Matches the gate screen, so the mark does not resize between the two. */
+const LOGO_SIZE = 34;
 
 export function LoginScreen({ onSignedIn }: Props) {
   const [email, setEmail] = useState('');
@@ -32,50 +26,6 @@ export function LoginScreen({ onSignedIn }: Props) {
   const [reveal, setReveal] = useState(false);
 
   const passwordRef = useRef<TextInput>(null);
-
-  /**
-   * 0 at rest, 1 once the keyboard is up. The mark starts large above the
-   * fields and shrinks into the title as the keyboard takes the screen, so
-   * the branding gives way to the thing being typed into rather than
-   * competing with it.
-   */
-  const collapse = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const to = (value: number) => (): void => {
-      Animated.timing(collapse, {
-        toValue: value,
-        duration: COLLAPSE_MS,
-        // Width, height and fontSize are layout properties, so this cannot run
-        // on the UI thread. It is a handful of views and stays smooth.
-        useNativeDriver: false,
-      }).start();
-    };
-
-    // iOS reports the keyboard before it moves, so the header travels with it;
-    // Android only reports it afterwards, hence the different events.
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const shown = Keyboard.addListener(showEvent, to(1));
-    const hidden = Keyboard.addListener(hideEvent, to(0));
-    return () => {
-      shown.remove();
-      hidden.remove();
-    };
-  }, [collapse]);
-
-  const logoSize = collapse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [LOGO_LARGE, LOGO_SMALL],
-  });
-  const logoRadius = collapse.interpolate({ inputRange: [0, 1], outputRange: [22, 8] });
-  const titleSize = collapse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [TITLE_LARGE, TITLE_SMALL],
-  });
-  const headerGap = collapse.interpolate({ inputRange: [0, 1], outputRange: [space.md, space.sm] });
-  const headerSpace = collapse.interpolate({ inputRange: [0, 1], outputRange: [space.xl, 0] });
 
   const submit = async (): Promise<void> => {
     if (busy || !email.trim() || !password) return;
@@ -127,25 +77,16 @@ export function LoginScreen({ onSignedIn }: Props) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
-        <Animated.View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: headerGap,
-            marginBottom: headerSpace,
-          }}
-        >
-          <Animated.Image
+        {/* Same size and arrangement as the gate screen, so the mark does not
+            jump when signing in. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Image
             source={require('../../assets/logo.png')}
             accessibilityIgnoresInvertColors
-            style={{ width: logoSize, height: logoSize, borderRadius: logoRadius }}
+            style={{ width: LOGO_SIZE, height: LOGO_SIZE, borderRadius: 8 }}
           />
-          <Animated.Text
-            style={{ fontWeight: typography.hero.fontWeight, color: colors.text, fontSize: titleSize }}
-          >
-            Porta
-          </Animated.Text>
-        </Animated.View>
+          <Text style={{ ...typography.hero, color: colors.text }}>Porta</Text>
+        </View>
 
         <Text style={{ ...typography.small, color: colors.textDim, marginBottom: space.md }}>
           Sign in to operate the gate.

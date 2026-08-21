@@ -108,7 +108,25 @@ export function GateScreen({ onSignedOut }: Props) {
     void setUse24h(next);
   };
 
-  const openMenu = (): void => setMenuOpen(true);
+  /**
+   * Where the blur starts, in window coordinates: the bottom of the header.
+   * Measured at open time rather than assumed, because the header sits below
+   * a safe-area inset that differs on every device.
+   */
+  const headerRef = useRef<View>(null);
+  const [blurTop, setBlurTop] = useState(0);
+
+  const openMenu = (): void => {
+    const header = headerRef.current;
+    if (!header) {
+      setMenuOpen(true);
+      return;
+    }
+    header.measureInWindow((_x, y, _width, height) => {
+      setBlurTop(y + height);
+      setMenuOpen(true);
+    });
+  };
 
   /**
    * Turning the lock ON prompts first and only saves if the prompt succeeds.
@@ -242,6 +260,7 @@ export function GateScreen({ onSignedOut }: Props) {
     <SettingsMenu
       visible={menuOpen}
       onClose={() => setMenuOpen(false)}
+      blurTop={blurTop}
       biometricOn={biometricOn}
       biometricBlockedReason={availability && !availability.available ? availability.reason : null}
       busy={togglingLock}
@@ -279,7 +298,7 @@ export function GateScreen({ onSignedOut }: Props) {
       <View style={{ gap: space.sm }}>
         {/* The name and the menu share the top line; the controller reading
             sits under them, smaller, because it changes and the name does not. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <View ref={headerRef} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <Image
             source={require('../../assets/logo.png')}
             accessibilityIgnoresInvertColors

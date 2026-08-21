@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, SafeAreaView, StatusBar, View } from 'react-native';
+import { ActivityIndicator, AppState, StatusBar, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { clearTokens, getAccessToken } from './src/session';
 import { isLockEnabled } from './src/biometrics';
 import { shouldRelock } from './src/gate-machine';
@@ -85,22 +86,32 @@ export default function App() {
   }, []);
 
   return (
-    // Forced dark, deliberately not following the system theme: one
-    // appearance, always, so the screen is never a surprise at night.
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+    /**
+     * SafeAreaView from react-native-safe-area-context, not react-native's --
+     * that one is deprecated and, more to the point, has never done anything
+     * on Android. Expo draws edge-to-edge there by default, so without real
+     * insets the header would sit under the status bar and the sign-out row
+     * under the gesture pill.
+     *
+     * Forced dark, deliberately not following the system theme: one
+     * appearance, always, so the screen is never a surprise at night.
+     */
+    <SafeAreaProvider>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
 
-      {shell === 'restoring' ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={colors.textDim} />
-        </View>
-      ) : shell === 'locked' ? (
-        <LockScreen onUnlocked={onUnlocked} onSignOut={onSignOutFromLock} />
-      ) : shell === 'signed-in' ? (
-        <GateScreen onSignedOut={onSignedOut} />
-      ) : (
-        <LoginScreen onSignedIn={onSignedIn} />
-      )}
-    </SafeAreaView>
+        {shell === 'restoring' ? (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator color={colors.textDim} />
+          </View>
+        ) : shell === 'locked' ? (
+          <LockScreen onUnlocked={onUnlocked} onSignOut={onSignOutFromLock} />
+        ) : shell === 'signed-in' ? (
+          <GateScreen onSignedOut={onSignedOut} />
+        ) : (
+          <LoginScreen onSignedIn={onSignedIn} />
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }

@@ -8,9 +8,14 @@ import {
   canTap, controllerView, cooldownProgress, nextState, secondsLeft, tapIsFinished,
   type GateUiState,
 } from '../gate-machine';
+import { Ionicons } from '@expo/vector-icons';
 import { GateButton } from '../components/GateButton';
 import { StatusPanel } from '../components/StatusPanel';
 import { ActivityList } from '../components/ActivityList';
+import { SettingsMenu } from '../components/SettingsMenu';
+import {
+  authenticate, checkAvailability, isLockEnabled, setLockEnabled, type Availability,
+} from '../biometrics';
 import { colors, space, type as typography } from '../theme';
 
 interface Props {
@@ -80,6 +85,49 @@ export function GateScreen({ onSignedOut }: Props) {
 
   // Leaving the screen must not fire a setState later.
   useEffect(() => stopBannerTimer, []);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [biometricOn, setBiometricOn] = useState(false);
+  const [availability, setAvailability] = useState<Availability | null>(null);
+  const [togglingLock, setTogglingLock] = useState(false);
+
+  // Read once. Hardware and enrolment do not change while the app is open.
+  useEffect(() => {
+    void checkAvailability().then(setAvailability);
+    void isLockEnabled().then(setBiometricOn);
+  }, []);
+
+  const openMenu = (): void => setMenuOpen(true);
+
+  /**
+   * Turning the lock ON prompts first and only saves if the prompt succeeds.
+   * Enabling it on the word of a sensor nobody has tested is how someone ends
+   * up locked out on the next launch.
+   *
+   * Turning it OFF is not gated behind a prompt. The tokens it guards are
+   * already reachable in this session -- demanding a fingerprint to lower a
+   * setting would add friction without adding protection.
+   */
+  const toggleBiometric = async (next: boolean): Promise<void> => {
+    setTogglingLock(true);
+    try {
+      if (!next) {
+        await setLockEnabled(false);
+        setBiometricOn(false);
+        return;
+      }
+
+      const proof = await authenticate('Confirm to turn on the lock');
+      if (!proof.ok) {
+        showBanner(proof.reason, colors.warn);
+        return;
+      }
+      await setLockEnabled(true);
+      setBiometricOn(true);
+    } finally {
+      setTogglingLock(false);
+    }
+  };
 
   // Only ticks while something is counting down, so an idle screen is not
   // waking the JS thread four times a second.
@@ -179,6 +227,40 @@ export function GateScreen({ onSignedOut }: Props) {
     : waiting > 0 ? 'gate is moving' : 'one pulse';
 
   return (
+    <>
+    <View
+      style={{
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingHorizontal: space.md,
+        paddingTop: space.sm,
+      }}
+    >
+      <Pressable
+        onPress={openMenu}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Settings"
+        style={{ padding: space.sm }}
+      >
+        <Ionicons name="ellipsis-vertical" size={22} color={colors.textDim} />
+      </Pressable>
+    </View>
+
+    <SettingsMenu
+      visible={menuOpen}
+      onClose={() => setMenuOpen(false)}
+      biometricOn={biometricOn}
+      biometricLabel={availability?.available ? availability.label : 'Biometric lock'}
+      biometricBlockedReason={availability && !availability.available ? availability.reason : null}
+      busy={togglingLock}
+      onToggleBiometric={(next) => { void toggleBiometric(next); }}
+      onSignOut={() => {
+        setMenuOpen(false);
+        void logout().finally(onSignedOut);
+      }}
+    />
+
     <ScrollView
       style={{ flex: 1 }}
       contentContainerStyle={{ padding: space.lg, paddingTop: space.xl, gap: space.lg }}
@@ -222,10 +304,8 @@ export function GateScreen({ onSignedOut }: Props) {
         <ActivityList events={events} />
       </View>
 
-      <Pressable onPress={() => { void logout().finally(onSignedOut); }} style={{ paddingVertical: space.md }}>
-        <Text style={{ ...typography.small, color: colors.textDim }}>Sign out</Text>
-      </Pressable>
     </ScrollView>
+    </>
   );
 }
 

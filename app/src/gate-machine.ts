@@ -138,6 +138,25 @@ export function controllerView(
     : { kind: 'offline', checkedAt: status.checkedAt };
 }
 
+/**
+ * How long the app may sit in the background before the biometric lock
+ * re-engages. Short enough that a phone left on a table re-locks, long enough
+ * that glancing at a message and coming straight back does not re-prompt.
+ */
+export const RELOCK_GRACE_MS = 15_000;
+
+/**
+ * Whether returning to the foreground should ask for biometrics again.
+ *
+ * Locking only on a cold start would make the feature theatre: phone apps are
+ * almost never killed, so the app would sit unlocked in the switcher forever.
+ */
+export const shouldRelock = (
+  backgroundedAt: number | null,
+  now: number,
+  graceMs: number = RELOCK_GRACE_MS,
+): boolean => backgroundedAt !== null && now - backgroundedAt >= graceMs;
+
 /** Whole seconds still to wait, floor 0. What the ring counts down. */
 export const secondsLeft = (until: number, now: number): number =>
   Math.max(0, Math.ceil((until - now) / 1000));

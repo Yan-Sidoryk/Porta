@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canTap, controllerView, cooldownProgress, messageFor, nextState, secondsLeft,
-  tapIsFinished, type GateUiState,
+  shouldRelock, tapIsFinished, type GateUiState,
 } from './gate-machine';
 
 const NOW = 1_700_000_000_000;
@@ -64,6 +64,20 @@ describe('nextState', () => {
   it('reports an unreachable backend distinctly from a denied one', () => {
     expect(messageFor('NETWORK_UNREACHABLE')).not.toBe(messageFor('ACCESS_DENIED'));
     expect(messageFor('NETWORK_UNREACHABLE')).toMatch(/connection|signal|wi-?fi/i);
+  });
+});
+
+describe('shouldRelock', () => {
+  it('does not re-lock a foreground app, however long it has run', () => {
+    expect(shouldRelock(null, NOW)).toBe(false);
+    expect(shouldRelock(null, NOW + 60 * 60_000)).toBe(false);
+  });
+
+  it('re-locks once the grace period has fully elapsed', () => {
+    const grace = 15_000;
+    expect(shouldRelock(NOW, NOW + grace - 1, grace)).toBe(false);
+    expect(shouldRelock(NOW, NOW + grace, grace)).toBe(true);
+    expect(shouldRelock(NOW, NOW + 60_000, grace)).toBe(true);
   });
 });
 

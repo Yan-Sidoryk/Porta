@@ -30,7 +30,16 @@ export function SettingsMenu({
   busy, onToggleBiometric, use24h, onToggle24h, onSignOut,
 }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      // Without these the modal stops at the system bars, so the blur ends in
+      // a hard line above the Android gesture pill and under the status bar.
+      statusBarTranslucent
+      navigationBarTranslucent
+    >
       {/* The scrim: anywhere outside the card dismisses. Blurred rather than
           merely dimmed, so the screen behind reads as suspended rather than
           just darkened. Android needs the experimental method explicitly --

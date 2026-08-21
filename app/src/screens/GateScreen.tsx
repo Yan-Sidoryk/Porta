@@ -315,7 +315,10 @@ export function GateScreen({ onSignedOut }: Props) {
         />
       </View>
 
-      <View style={{ gap: space.sm }}>
+      {/* Pushed down so the button sits in its own space rather than being
+          crowded from below -- the strip above it is a fixed height, so the
+          gap underneath has to be deliberate to balance it. */}
+      <View style={{ gap: space.sm, marginTop: space.lg }}>
         <Text style={{ ...typography.title, color: colors.text }}>Recent activity</Text>
         <ActivityList events={events} use24h={use24h} />
       </View>

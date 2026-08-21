@@ -40,9 +40,11 @@ export function StatusPanel({ view, use24h }: Props) {
 
         {view.kind === 'online' || view.kind === 'offline' ? (
           // Pushed to the far end of the same line: it qualifies the reading,
-          // so it belongs beside it rather than on a row of its own.
+          // so it belongs beside it rather than on a row of its own. "Checked"
+          // earns its word -- a bare time next to a status line reads as a
+          // clock rather than as the age of the reading.
           <Text style={{ ...typography.small, color: colors.textDim, marginLeft: 'auto' }}>
-            {formatClock(view.checkedAt, use24h)}
+            Checked {formatClock(view.checkedAt, use24h)}
           </Text>
         ) : null}
       </View>

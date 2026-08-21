@@ -7,8 +7,6 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   biometricOn: boolean;
-  /** Null while availability is still being read, or if the device cannot. */
-  biometricLabel: string | null;
   /** Why the toggle is unavailable, shown under it. */
   biometricBlockedReason: string | null;
   busy: boolean;
@@ -26,7 +24,7 @@ interface Props {
  * it. No navigation library involved.
  */
 export function SettingsMenu({
-  visible, onClose, biometricOn, biometricLabel, biometricBlockedReason,
+  visible, onClose, biometricOn, biometricBlockedReason,
   busy, onToggleBiometric, use24h, onToggle24h, onSignOut,
 }: Props) {
   return (
@@ -72,8 +70,8 @@ export function SettingsMenu({
             }}
           >
             <Row
-              title={biometricLabel ?? 'Biometric lock'}
-              subtitle="Ask to unlock when the app opens"
+              title="Biometric unlock"
+              subtitle="Extra protection each time the app opens"
               value={biometricOn}
               disabled={busy || biometricBlockedReason !== null}
               onValueChange={onToggleBiometric}

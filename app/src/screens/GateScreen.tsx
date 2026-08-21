@@ -243,7 +243,6 @@ export function GateScreen({ onSignedOut }: Props) {
       visible={menuOpen}
       onClose={() => setMenuOpen(false)}
       biometricOn={biometricOn}
-      biometricLabel={availability?.available ? availability.label : 'Biometric lock'}
       biometricBlockedReason={availability && !availability.available ? availability.reason : null}
       busy={togglingLock}
       onToggleBiometric={(next) => { void toggleBiometric(next); }}

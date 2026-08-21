@@ -13,9 +13,15 @@ import * as SecureStore from 'expo-secure-store';
 const ENABLED_KEY = 'gate.biometricLock';
 
 export type Availability =
-  | { available: true; label: string }
+  | { available: true }
   | { available: false; reason: string };
 
+/**
+ * Deliberately does not name the method. A phone can have both a face sensor
+ * and a fingerprint reader enrolled, and the system prompt decides which to
+ * offer -- so calling the setting "Face unlock" would be wrong half the time
+ * on exactly the devices that support the most.
+ */
 export async function checkAvailability(): Promise<Availability> {
   if (!(await LocalAuthentication.hasHardwareAsync())) {
     return { available: false, reason: 'This device has no fingerprint or face sensor.' };
@@ -26,15 +32,7 @@ export async function checkAvailability(): Promise<Availability> {
       reason: 'No fingerprint or face is set up on this device yet. Add one in system settings first.',
     };
   }
-
-  const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-  const label = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
-    ? 'Face unlock'
-    : types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
-      ? 'Fingerprint unlock'
-      : 'Biometric unlock';
-
-  return { available: true, label };
+  return { available: true };
 }
 
 /**

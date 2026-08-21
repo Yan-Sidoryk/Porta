@@ -6,7 +6,21 @@ import type {
 import { IDEMPOTENCY_WINDOW_MS } from '../domain/constants.js';
 
 export type TriggerResult =
-  | { ok: true; outcome: PulseOutcome; replayed: boolean }
+  | {
+      ok: true;
+      outcome: PulseOutcome;
+      replayed: boolean;
+      /**
+       * How long the guard will keep rejecting after this pulse.
+       *
+       * The app disables its button for exactly this long, and must never
+       * assume a number: GATE_COOLDOWN_MS is server-side configuration the
+       * client cannot see. Without this field the commonest path -- a
+       * successful tap -- leaves the button live, which is the double tap the
+       * cooldown exists to prevent.
+       */
+      retryAfterMs?: number;
+    }
   | {
       ok: false;
       code: ErrorCode;
@@ -46,10 +60,14 @@ const OUTCOME_TO_CODE: Record<Exclude<PulseOutcome, 'success'>, ErrorCode> = {
 const toResult = (
   outcome: PulseOutcome,
   replayed: boolean,
+  cooldownMs: number,
   detail?: string,
 ): TriggerResult =>
   outcome === 'success'
-    ? { ok: true, outcome, replayed }
+    ? // Measured from now rather than from claim time, so it over-states by
+      // however long the pulse took. Over-stating re-enables the button a
+      // little late; under-stating re-enables it while the guard still says no.
+      { ok: true, outcome, replayed, retryAfterMs: cooldownMs }
     : {
         ok: false,
         code: OUTCOME_TO_CODE[outcome],
@@ -96,7 +114,9 @@ export class TriggerGateUseCase implements TriggerGate {
         // is still in flight ('pending').
         return claim.outcome === 'pending'
           ? { ok: false, code: 'ATTEMPT_IN_PROGRESS', replayed: true }
-          : toResult(claim.outcome, true);
+          // The original claim is already partly spent, so this over-states the
+          // remaining window too -- again in the direction that waits longer.
+          : toResult(claim.outcome, true, this.cooldownMs);
       }
 
       // Never retried: exactly one pulse per granted claim. If this rejects,
@@ -105,7 +125,7 @@ export class TriggerGateUseCase implements TriggerGate {
       // its full pessimistic 2x window rather than being narrowed or freed.
       const result = await this.gate.pulse();
       await this.guard.release(claim.claimId, result.outcome);
-      return toResult(result.outcome, false, result.detail);
+      return toResult(result.outcome, false, this.cooldownMs, result.detail);
     } catch (err) {
       // Adapter failure (SQLite, HTTP, etc). Never let a raw exception cross
       // the layer boundary; never release a claim here -- see the note above.

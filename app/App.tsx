@@ -1,114 +1,49 @@
-import { useRef, useState } from 'react';
-import { Button, ScrollView, Text, TextInput, View } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import * as Crypto from 'expo-crypto';
-import * as Haptics from 'expo-haptics';
-import { baseUrl, getStatus, login, logout, trigger, NETWORK_UNREACHABLE } from './src/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, SafeAreaView, StatusBar, View } from 'react-native';
+import { getAccessToken } from './src/session';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { GateScreen } from './src/screens/GateScreen';
+import { colors } from './src/theme';
 
-/**
- * The throwaway slice from Task 12 of the build plan: enough screen to prove
- * login, trigger and cooldown work over the wire from a physical phone. The
- * real UI is milestone 6 -- deliberately no styling work here.
- */
+type Shell = 'restoring' | 'signed-out' | 'signed-in';
+
 export default function App() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState('');
+  const [shell, setShell] = useState<Shell>('restoring');
 
   /**
-   * One UUID per user-initiated tap, held until that tap gets a definite
-   * answer. A network failure is not an answer -- the pulse may well have
-   * fired -- so the next press reuses the key and the backend replays the
-   * original result instead of sending a second pulse.
+   * Session restore. Tokens already live in the keystore, so a returning user
+   * goes straight to the gate -- re-typing a password while standing at a gate
+   * in the rain is not a security feature.
+   *
+   * Only the presence of a token is checked here, not its validity. An expired
+   * access token is handled where it surfaces: api.ts refreshes once on a 401,
+   * and the screens sign out if that fails. Validating up front would mean a
+   * network round trip before the first frame.
    */
-  const tapKey = useRef<string | null>(null);
+  useEffect(() => {
+    void getAccessToken()
+      .then((token) => setShell(token ? 'signed-in' : 'signed-out'))
+      .catch(() => setShell('signed-out'));
+  }, []);
 
-  const show = (value: unknown): void => setResult(JSON.stringify(value, null, 2));
-
-  const onLogin = async (): Promise<void> => {
-    setBusy(true);
-    const outcome = await login(email.trim(), password);
-    setBusy(false);
-    show(outcome);
-    if (outcome.ok) {
-      setLoggedIn(true);
-      setPassword('');
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
-  };
-
-  const onTrigger = async (): Promise<void> => {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    tapKey.current ??= Crypto.randomUUID();
-
-    setBusy(true);
-    const outcome = await trigger(tapKey.current);
-    setBusy(false);
-    show(outcome);
-
-    // Anything the backend actually answered ends this tap, including a
-    // rejection. Only an unreachable backend keeps the key alive for a retry.
-    if (outcome.ok || outcome.code !== NETWORK_UNREACHABLE) tapKey.current = null;
-
-    await Haptics.notificationAsync(
-      outcome.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error,
-    );
-  };
-
-  const onStatus = async (): Promise<void> => {
-    setBusy(true);
-    show(await getStatus());
-    setBusy(false);
-  };
-
-  const onLogout = async (): Promise<void> => {
-    await logout();
-    setLoggedIn(false);
-    setResult('');
-  };
+  const onSignedOut = useCallback(() => setShell('signed-out'), []);
+  const onSignedIn = useCallback(() => setShell('signed-in'), []);
 
   return (
-    <View style={{ flex: 1, padding: 24, paddingTop: 72, gap: 12 }}>
-      <StatusBar style="auto" />
-      <Text>backend: {baseUrl()}</Text>
+    // Forced dark, deliberately not following the system theme: one
+    // appearance, always, so the screen is never a surprise at night.
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
 
-      {loggedIn ? (
-        <>
-          <Button title="Open / close gate" onPress={onTrigger} disabled={busy} />
-          <Button title="Check status" onPress={onStatus} disabled={busy} />
-          <Button title="Log out" onPress={onLogout} disabled={busy} />
-        </>
+      {shell === 'restoring' ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.textDim} />
+        </View>
+      ) : shell === 'signed-in' ? (
+        <GateScreen onSignedOut={onSignedOut} />
       ) : (
-        <>
-          <TextInput
-            placeholder="email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={{ borderWidth: 1, padding: 8 }}
-          />
-          <TextInput
-            placeholder="password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            style={{ borderWidth: 1, padding: 8 }}
-          />
-          <Button title="Log in" onPress={onLogin} disabled={busy} />
-        </>
+        <LoginScreen onSignedIn={onSignedIn} />
       )}
-
-      <ScrollView>
-        <Text selectable style={{ fontFamily: 'monospace' }}>
-          {result}
-        </Text>
-      </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }

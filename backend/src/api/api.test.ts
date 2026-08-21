@@ -122,7 +122,9 @@ describe('POST /gate/trigger', () => {
   it('pulses once for an authenticated owner', async () => {
     const res = await trigger(owner, KEY);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: true, outcome: 'success', replayed: false });
+    expect(res.json()).toEqual({
+      ok: true, outcome: 'success', replayed: false, retryAfterMs: COOLDOWN,
+    });
     expect(gate.calls).toBe(1);
   });
 

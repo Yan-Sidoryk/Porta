@@ -10,6 +10,12 @@ export const TriggerResponseSchema = z.discriminatedUnion('ok', [
     ok: z.literal(true),
     outcome: z.enum(PULSE_OUTCOMES),
     replayed: z.boolean(),
+    /**
+     * How long the gate stays in cooldown after this pulse. The app disables
+     * its button for exactly this long and never assumes a number -- the
+     * cooldown is server-side configuration the client cannot see.
+     */
+    retryAfterMs: z.number().int().nonnegative().optional(),
   }),
   z.object({
     ok: z.literal(false),
@@ -68,6 +74,9 @@ export const AuditEventSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+/** What `GET /audit` returns: newest last. */
+export const AuditListResponseSchema = z.array(AuditEventSchema);
+
 export type TriggerRequest = z.infer<typeof TriggerRequestSchema>;
 export type TriggerResponse = z.infer<typeof TriggerResponseSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
@@ -78,5 +87,6 @@ export type IssueGrantResponse = z.infer<typeof IssueGrantResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type GateStatusResponse = z.infer<typeof GateStatusResponseSchema>;
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+export type AuditListResponse = z.infer<typeof AuditListResponseSchema>;
 
 export * from './vocabulary.js';

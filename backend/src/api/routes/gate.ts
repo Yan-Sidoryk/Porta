@@ -33,7 +33,12 @@ export function registerGateRoutes(app: FastifyInstance, container: Container): 
     // on an INTERNAL failure -- a raw adapter error whose text can contain the
     // Shelly auth key, since the key travels in the request's query string.
     if (result.ok) {
-      return reply.send({ ok: true, outcome: result.outcome, replayed: result.replayed });
+      return reply.send({
+        ok: true,
+        outcome: result.outcome,
+        replayed: result.replayed,
+        ...(result.retryAfterMs === undefined ? {} : { retryAfterMs: result.retryAfterMs }),
+      });
     }
     return fail(reply, result.code, {
       replayed: result.replayed,

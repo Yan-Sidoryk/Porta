@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
 import {
+  AuditListResponseSchema,
+  type AuditEvent,
   ErrorResponseSchema,
   GateStatusResponseSchema,
   LoginResponseSchema,
@@ -9,18 +11,13 @@ import {
   type TriggerResponse,
 } from '@gate/shared';
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from './session';
+import { NETWORK_UNREACHABLE, type ApiFailure } from './gate-machine';
+
+// Defined in gate-machine.ts and re-exported here for callers: that module has
+// to stay free of react-native imports so it can be unit tested.
+export { NETWORK_UNREACHABLE, type ApiFailure };
 
 const BACKEND_PORT = 3000;
-
-/** A failure the backend never sent: DNS, refused connection, airplane mode. */
-export const NETWORK_UNREACHABLE = 'NETWORK_UNREACHABLE';
-
-export interface ApiFailure {
-  ok: false;
-  code: ErrorCode | typeof NETWORK_UNREACHABLE;
-  message: string;
-  retryAfterMs?: number;
-}
 
 const unreachable = (): ApiFailure => ({
   ok: false,
@@ -162,6 +159,15 @@ export async function trigger(idempotencyKey: string): Promise<TriggerResponse |
   // carry `replayed` and `retryAfterMs`, which the plain error shape lacks.
   const parsed = TriggerResponseSchema.safeParse(reply.body);
   return parsed.success ? parsed.data : toFailure(reply.body);
+}
+
+export async function getAudit(limit = 20): Promise<AuditEvent[] | ApiFailure> {
+  const reply = await authed(`/audit?limit=${limit}`, { method: 'GET' });
+  if (!reply) return unreachable();
+  if (reply.status !== 200) return toFailure(reply.body);
+
+  const parsed = AuditListResponseSchema.safeParse(reply.body);
+  return parsed.success ? parsed.data : unexpected();
 }
 
 export async function getStatus(): Promise<GateStatusResponse | ApiFailure> {

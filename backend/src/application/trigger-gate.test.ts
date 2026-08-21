@@ -31,7 +31,11 @@ beforeEach(() => {
 describe('TriggerGateUseCase', () => {
   it('pulses once for an owner', async () => {
     const r = await useCase.execute('owner1', KEY);
-    expect(r).toEqual({ ok: true, outcome: 'success', replayed: false });
+    // retryAfterMs on SUCCESS too: the app disables its button for exactly
+    // this long, and cannot infer it -- the cooldown is server configuration.
+    expect(r).toEqual({
+      ok: true, outcome: 'success', replayed: false, retryAfterMs: COOLDOWN,
+    });
     expect(gate.calls).toBe(1);
   });
 

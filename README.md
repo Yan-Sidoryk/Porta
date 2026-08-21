@@ -292,6 +292,22 @@ can honestly be said about what happened at the gate.
 command may have gone through despite the failure, which is why nothing in the
 stack ever retries it automatically.
 
+**How much is shown, and how much is kept.** The list shows **every user's**
+attempts, not just your own — that is the point of it, and something to weigh
+before issuing a guest grant, since a guest can then see the gate's whole
+history.
+
+| Layer | Limit |
+|---|---|
+| App | The **20** most recent, newest first. Pull down to re-fetch |
+| API | Caps any request at **200** (`GET /audit?limit=n`) |
+| Database | **Nothing is deleted.** Every attempt is kept indefinitely |
+
+There is no pagination in the app, so older entries are reachable only by
+calling `GET /audit?limit=n` or reading `gate.db` directly. The table grows by
+roughly one row per gate attempt — a few hundred KB a year at household
+volume, which is why it is never pruned.
+
 ### Biometric lock
 
 Off by default, in the menu behind the three dots at the top right, alongside

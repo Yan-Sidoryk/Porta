@@ -8,7 +8,11 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: plan one complete (12 of 12), verified on a physical phone
+## Status: milestones 1–7 built. Final review and deployment remain.
+
+The backend, the app and both documents are done. What is left is a
+fresh-context review of the whole thing, one measurement that needs the relay
+powered, and putting the backend somewhere that runs 24/7. See **Next**.
 
 Branch: `build/gate-opener-backend`
 
@@ -127,8 +131,9 @@ only from the integration test, with no environment variable that can set it.
 
 ## Tested
 
-`npm test` at the root: **183 backend + 4 shared passing.** All three
-workspaces typecheck, `app` included.
+`npm test` at the root: **183 backend + 23 app + 4 shared passing.** All three
+workspaces typecheck. `npx expo export --platform android` bundles clean, which
+is what proves the app's module graph resolves across the workspace.
 
 Task 12 was driven end to end against the stub, over real HTTP, with the
 compiled server: login, `reachable: true` (the first confirmation that the
@@ -170,7 +175,35 @@ Task 12's one mutation: flipping `allowCors` to default `true` — caught by
 
 ## Next
 
-**Plan one is complete. Milestone 6 is next.**
+Four things, roughly in order of how much they matter.
+
+**1. Final review.** Milestone 7 calls for a fresh-context pass over the whole
+system plus a full suite run. Not yet done. The app in particular has never had
+a review — it was built conversationally.
+
+**2. Pin the reachability path.** `findOnline` in `state-adapter.ts` still
+searches the Shelly response for `online` at any depth. Confirmed working in
+both directions against real hardware, but that proved the *walk* works, not
+*where the flag lives*. It returns true if `online` is truthy anywhere in the
+payload, and the false-positive direction is the dangerous one. **Needs the
+relay powered:** run `npm run probe-shelly -w backend` — read-only, it calls
+`get` and never `set/switch` — then replace the walk with the exact path.
+
+**3. Deployment.** The backend still only runs on a dev machine on the LAN. A
+gate is opened from a car on mobile data, so it needs a public address and TLS.
+A small VPS is the shorter path than a box at home: the backend talks to Shelly
+*Cloud*, not to the relay, so it gains nothing from being on the gate's network
+— unless a local-control adapter is ever fitted, which would reverse that.
+`README.md` has the TLS deployment steps.
+
+**4. Per-user activity filtering, parked by the owner.** `GET /audit` returns
+every user's attempts, with emails, to any signed-in user. Deliberate — SPEC.md
+asks for "who operated the gate and when". It becomes a real problem the first
+time a guest grant is issued, because that guest can then read the household's
+whole coming-and-going history. Owner-sees-all with users-see-their-own is the
+suggested shape.
+
+---
 
 Task 12 step 6 ran on a **physical phone** on 2026-08-21, against the real
 Shelly relay powered on a bench with nothing wired to its I/O terminals — so
@@ -270,11 +303,49 @@ read version-pinned Expo docs has already earned its keep: it is why the SDK
 docs were fetched rather than written from memory, immediately before the
 Expo Go SDK 54 ceiling turned up.
 
-## Deferred to a second plan
+## Milestones 6 and 7 — built 2026-08-21
 
-Milestone 6 (full app UI, biometric lock, activity list, icon and splash) and
-milestone 7 (`README.md`, `ARCHITECTURE.md`). Plan two does not begin until
-Task 12 has run on a **physical phone**, not a simulator.
+Deliberately without a second plan document. Milestone 6 was built
+conversationally against the design doc's §11 and §11.1, screen by screen, with
+the phone in hand between changes — the right shape of work for UI, where the
+judgement calls are visual and a written plan would have been guessing.
+
+**Milestone 6 — the app.** Replaced the Task 12 slice entirely. Forced dark, one
+round button low and centred, cooldown drawn on the button, no gate iconography.
+Amber rather than green: a red/green vocabulary would state something untrue
+about a gate whose position is unknown. Session restore, activity list,
+biometric lock (default **off**) behind a three-dot menu with a 24-hour clock
+setting and sign out, blurred menu scrim that leaves the header sharp, icon,
+splash, and the name **Porta**.
+
+`gate-machine.ts` holds every decision with no React or `react-native` import,
+so the app is unit tested like the backend. That constraint is load-bearing:
+importing `./api` reaches `expo-constants` then `react-native`, whose Flow
+syntax no runner here can parse.
+
+**Milestone 7 — docs.** `README.md` and `ARCHITECTURE.md`.
+
+Five defects were found and fixed by using the app on real hardware, none of
+which any test would have caught:
+
+- A failed status *check* rendered as "Controller offline" — asserting hardware
+  state we had merely failed to ask about. Now four distinct states.
+- Status was re-read immediately after a pulse, one second into a client rate
+  limited to one Shelly request per second. It could only fail, and made the
+  controller look like it had dropped.
+- `ATTEMPT_IN_PROGRESS` left the screen stuck in `sending` forever, with the
+  button disabled until the app was restarted.
+- `SafeAreaView` from `react-native` does nothing on Android, and Expo now draws
+  edge-to-edge there, so content ran under the system bars.
+- The menu blur was aligned by comparing `measureInWindow` coordinates against a
+  status-bar-translucent Modal's origin. The two do not share an origin on
+  Android; the blur cut through the app name.
+
+One contract gap surfaced while building the cooldown ring: the design requires
+the countdown to render the server's `retryAfterMs`, but the **success**
+response carried none — only the 409 did. So the commonest path left the button
+live for an immediate second tap. `TriggerResponseSchema` now carries it on
+success too.
 
 ## Deviations from SPEC.md
 

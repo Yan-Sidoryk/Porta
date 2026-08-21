@@ -26,8 +26,12 @@ const MIN_TOP_GAP = 24;
 /** Matches the gate screen, so the mark does not resize between the two. */
 const LOGO_SIZE = 34;
 
-/** Android reports no keyboard duration, so it needs a sensible one. */
-const LIFT_MS = 260;
+/**
+ * Android reports no keyboard duration, so it needs one of its own. Snappy on
+ * purpose -- but not much below this, or the lift stops reading as movement
+ * and goes back to looking like the jump it replaced.
+ */
+const LIFT_MS = 170;
 
 export function LoginScreen({ onSignedIn }: Props) {
   const [email, setEmail] = useState('');

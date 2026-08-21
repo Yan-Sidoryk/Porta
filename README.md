@@ -197,6 +197,96 @@ npm start -w backend
 
 ---
 
+## Managing users and access
+
+### More users
+
+Same CLI, on the host. `--role` defaults to `user`, so it can be omitted:
+
+```bash
+npm run create-user -w backend -- --email them@example.com --password 'something' --role user
+```
+
+**Save the UUID it prints.** You need it to issue a grant, and there is no
+list-users endpoint. If you lose it:
+
+```bash
+sqlite3 backend/gate.db "select id, email, role from users;"
+```
+
+There is no password-change flow. Changing someone's password means creating
+the account again with a new one.
+
+### Roles
+
+**`owner`** can always operate the gate, no grant required, and is the only role
+that can issue or revoke grants. You can have as many owners as you like —
+`--role owner`.
+
+**`user`** can do **nothing** until an owner grants them a window. That is the
+default branch of the access policy, not an oversight: a freshly created account
+is inert, and a revoked grant denies immediately rather than falling back to
+something permissive.
+
+### Temporary access
+
+Grants are the mechanism, and they are **API-only** — the guest UI is out of
+scope, so there is nothing for this in the app. First get an owner's token:
+
+```bash
+curl -X POST http://<host>:3000/auth/login \
+  -H "content-type: application/json" \
+  -d '{"email":"you@example.com","password":"..."}'
+```
+
+Then issue the grant with the `accessToken` from that response:
+
+```bash
+curl -X POST http://<host>:3000/access-grants \
+  -H "authorization: Bearer <accessToken>" \
+  -H "content-type: application/json" \
+  -d '{"userId":"<their-uuid>","startsAt":"2026-08-22T09:00:00.000Z","endsAt":"2026-08-22T18:00:00.000Z"}'
+```
+
+Times are ISO-8601 UTC. An inverted or empty window is rejected, so the owner
+finds out immediately rather than the guest finding out at the gate. Access
+tokens last 15 minutes, so fetch a fresh one if the call comes back 401.
+
+**Save the `grantId` it returns** — you need it to revoke, and `GET
+/access-grants` was deliberately not built. If you lose it:
+
+```bash
+sqlite3 backend/gate.db "select id, user_id, starts_at, ends_at, revoked_at from access_grants;"
+```
+
+### Revoking
+
+Any time, and it takes effect on the **very next tap** — the policy re-checks
+grants on every trigger, so there is no session to wait out:
+
+```bash
+curl -X DELETE http://<host>:3000/access-grants/<grantId> \
+  -H "authorization: Bearer <accessToken>"
+```
+
+Returns `204`. Revoking an id that does not exist also returns `204`,
+deliberately: an honest `404` would turn this endpoint into a probe for which
+grant ids are real.
+
+### Cutting someone off entirely
+
+Revoking the grant is the intended lever for a `user`. For an owner — or to
+disable an account outright — there is currently **no endpoint or CLI**. The
+`disabled` column exists and every path honours it (the account is refused and
+its refresh tokens are revoked the next time it tries to refresh), but nothing
+sets it:
+
+```bash
+sqlite3 backend/gate.db "update users set disabled = 1 where email = 'them@example.com';"
+```
+
+---
+
 ## Running it without moving a real gate
 
 **Every trigger against a real `SHELLY_HOST` moves the actual gate.** For

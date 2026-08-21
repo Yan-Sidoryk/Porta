@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Image, KeyboardAvoidingView,
+  ActivityIndicator, Animated, Image, Keyboard, Platform,
   Pressable, ScrollView, Text, TextInput, View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -18,6 +19,9 @@ const KEYBOARD_GAP = 48;
 /** Matches the gate screen, so the mark does not resize between the two. */
 const LOGO_SIZE = 34;
 
+/** Android reports no keyboard duration, so it needs a sensible one. */
+const LIFT_MS = 260;
+
 export function LoginScreen({ onSignedIn }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,6 +30,72 @@ export function LoginScreen({ onSignedIn }: Props) {
   const [reveal, setReveal] = useState(false);
 
   const passwordRef = useRef<TextInput>(null);
+
+  /**
+   * The form is lifted by an animation this screen owns, rather than by
+   * KeyboardAvoidingView.
+   *
+   * That component works by resizing or padding its container, so the centred
+   * content re-centres in one layout pass -- which is the jump. Here the
+   * viewport height is frozen at its first measurement, so the container never
+   * re-centres, and the only thing that moves is a transform. Transforms run
+   * on the native driver, so the lift is genuinely smooth rather than a series
+   * of layout passes.
+   */
+  const lift = useRef(new Animated.Value(0)).current;
+
+  /** Frozen at rest: the keyboard resizes this view on Android. */
+  const viewport = useRef(0);
+  const formHeight = useRef(0);
+  const [frozenViewport, setFrozenViewport] = useState(0);
+
+  const measureViewport = (event: LayoutChangeEvent): void => {
+    const { height } = event.nativeEvent.layout;
+    if (viewport.current === 0 && height > 0) {
+      viewport.current = height;
+      setFrozenViewport(height);
+    }
+  };
+
+  const measureForm = (event: LayoutChangeEvent): void => {
+    formHeight.current = event.nativeEvent.layout.height;
+  };
+
+  useEffect(() => {
+    const animate = (toValue: number, duration: number): void => {
+      Animated.timing(lift, {
+        toValue,
+        duration: duration > 0 ? duration : LIFT_MS,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    // iOS reports the keyboard before it moves, so the form travels with it.
+    // Android only reports it afterwards, hence the different events.
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const shown = Keyboard.addListener(showEvent, (event) => {
+      if (viewport.current === 0) return;
+
+      // The form is centred, so its bottom sits half its height below the
+      // middle. Lift only by however much the keyboard actually covers.
+      const formBottom = (viewport.current + formHeight.current) / 2;
+      const keyboardTop = viewport.current - event.endCoordinates.height;
+      const overlap = Math.max(0, formBottom + KEYBOARD_GAP - keyboardTop);
+
+      animate(-overlap, event.duration ?? 0);
+    });
+
+    const hidden = Keyboard.addListener(hideEvent, (event) => {
+      animate(0, event.duration ?? 0);
+    });
+
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, [lift]);
 
   const submit = async (): Promise<void> => {
     if (busy || !email.trim() || !password) return;
@@ -59,27 +129,25 @@ export function LoginScreen({ onSignedIn }: Props) {
   } as const;
 
   return (
-    // Lifts the form clear of the keyboard rather than letting it cover the
-    // field being typed into. The ScrollView inside is what gives the extra
-    // gap: without it the focused input sits flush against the keyboard.
-    <KeyboardAvoidingView
+    <ScrollView
       style={{ flex: 1 }}
-      // 'padding' on both platforms, not 'height' on Android. Height resizes
-      // the container in a single step, which is what made the fields appear
-      // to teleport; padding is animated with the keyboard's own duration.
-      behavior="padding"
-      keyboardVerticalOffset={0}
+      onLayout={measureViewport}
+      contentContainerStyle={{
+        // The FROZEN height, not flexGrow. If this tracked the live height,
+        // the keyboard resizing the window would re-centre the form in a
+        // single layout pass -- exactly the jump being removed.
+        minHeight: frozenViewport || undefined,
+        justifyContent: 'center',
+        padding: space.lg,
+        gap: space.md,
+      }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+      showsVerticalScrollIndicator={false}
     >
-      <ScrollView
-        contentContainerStyle={{
-          flexGrow: 1,
-          justifyContent: 'center',
-          padding: space.lg,
-          paddingBottom: space.lg + KEYBOARD_GAP,
-          gap: space.md,
-        }}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
+      <Animated.View
+        onLayout={measureForm}
+        style={{ gap: space.md, transform: [{ translateY: lift }] }}
       >
         {/* Same size and arrangement as the gate screen, so the mark does not
             jump when signing in. */}
@@ -163,7 +231,7 @@ export function LoginScreen({ onSignedIn }: Props) {
             ? <ActivityIndicator color={colors.textDim} />
             : <Text style={{ ...typography.title, color: '#1A1206' }}>Sign in</Text>}
         </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </Animated.View>
+    </ScrollView>
   );
 }

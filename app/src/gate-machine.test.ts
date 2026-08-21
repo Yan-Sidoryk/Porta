@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canTap, cooldownProgress, messageFor, nextState, secondsLeft, tapIsFinished,
-  type GateUiState,
+  canTap, controllerView, cooldownProgress, messageFor, nextState, secondsLeft,
+  tapIsFinished, type GateUiState,
 } from './gate-machine';
 
 const NOW = 1_700_000_000_000;
@@ -64,6 +64,40 @@ describe('nextState', () => {
   it('reports an unreachable backend distinctly from a denied one', () => {
     expect(messageFor('NETWORK_UNREACHABLE')).not.toBe(messageFor('ACCESS_DENIED'));
     expect(messageFor('NETWORK_UNREACHABLE')).toMatch(/connection|signal|wi-?fi/i);
+  });
+});
+
+describe('controllerView', () => {
+  const CHECKED = '2026-08-21T10:00:00.000Z';
+
+  it('reports online and offline from a real reading', () => {
+    expect(controllerView({ position: 'unknown', reachable: true, checkedAt: CHECKED }))
+      .toEqual({ kind: 'online', checkedAt: CHECKED });
+    expect(controllerView({ position: 'unknown', reachable: false, checkedAt: CHECKED }))
+      .toEqual({ kind: 'offline', checkedAt: CHECKED });
+  });
+
+  // The bug this exists to prevent: a failed CHECK is not an offline
+  // CONTROLLER, and saying so is a claim about hardware we never reached.
+  it('never reports offline when the check itself failed', () => {
+    const rateLimited = controllerView({ ok: false, code: 'RATE_LIMITED', message: 'x' });
+    expect(rateLimited.kind).toBe('unreadable');
+
+    const noNetwork = controllerView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' });
+    expect(noNetwork.kind).toBe('unreadable');
+  });
+
+  it('distinguishes a missing connection from a failed check', () => {
+    const noNetwork = controllerView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' });
+    const other = controllerView({ ok: false, code: 'INTERNAL', message: 'x' });
+    if (noNetwork.kind !== 'unreadable' || other.kind !== 'unreadable') {
+      throw new Error('expected both to be unreadable');
+    }
+    expect(noNetwork.reason).not.toBe(other.reason);
+  });
+
+  it('is checking, not offline, before the first reading lands', () => {
+    expect(controllerView(null)).toEqual({ kind: 'checking' });
   });
 });
 

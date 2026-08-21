@@ -1,4 +1,4 @@
-import type { ErrorCode, TriggerResponse } from '@gate/shared';
+import type { ErrorCode, GateStatusResponse, TriggerResponse } from '@gate/shared';
 
 /**
  * Everything the gate screen decides, with no React and no fetch in it, so it
@@ -101,6 +101,41 @@ export function nextState(
       ? {}
       : { until: now + reply.retryAfterMs, totalMs: reply.retryAfterMs }),
   };
+}
+
+/**
+ * What the top of the screen is allowed to say about the controller.
+ *
+ * `unreadable` exists because a failed CHECK is not an offline CONTROLLER.
+ * Collapsing the two would have the app assert something about hardware it
+ * merely failed to ask about -- the same class of lie as displaying "Closed"
+ * for a gate whose position is unknown.
+ */
+export type ControllerView =
+  | { kind: 'checking' }
+  | { kind: 'online'; checkedAt: string }
+  | { kind: 'offline'; checkedAt: string }
+  /** The check did not complete. Says nothing about the controller. */
+  | { kind: 'unreadable'; reason: string };
+
+export function controllerView(
+  reading: GateStatusResponse | ApiFailure | null,
+): ControllerView {
+  if (reading === null) return { kind: 'checking' };
+
+  if ('ok' in reading && reading.ok === false) {
+    return {
+      kind: 'unreadable',
+      reason: reading.code === NETWORK_UNREACHABLE
+        ? 'No connection to the gate service.'
+        : 'Could not check the controller just now.',
+    };
+  }
+
+  const status = reading as GateStatusResponse;
+  return status.reachable
+    ? { kind: 'online', checkedAt: status.checkedAt }
+    : { kind: 'offline', checkedAt: status.checkedAt };
 }
 
 /** Whole seconds still to wait, floor 0. What the ring counts down. */

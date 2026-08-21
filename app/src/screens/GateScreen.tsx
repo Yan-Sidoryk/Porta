@@ -3,9 +3,9 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import type { AuditEvent, GateStatusResponse } from '@gate/shared';
-import { getAudit, getStatus, logout, trigger } from '../api';
+import { getAudit, getStatus, logout, trigger, type ApiFailure } from '../api';
 import {
-  canTap, cooldownProgress, nextState, secondsLeft, tapIsFinished,
+  canTap, controllerView, cooldownProgress, nextState, secondsLeft, tapIsFinished,
   type GateUiState,
 } from '../gate-machine';
 import { GateButton } from '../components/GateButton';
@@ -22,9 +22,9 @@ const TICK_MS = 250;
 
 export function GateScreen({ onSignedOut }: Props) {
   const [state, setState] = useState<GateUiState>({ kind: 'idle' });
-  const [status, setStatus] = useState<GateStatusResponse | null>(null);
+  /** null until the first read lands -- rendered as "checking", not "offline". */
+  const [reading, setReading] = useState<GateStatusResponse | ApiFailure | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [loadingStatus, setLoadingStatus] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -45,21 +45,36 @@ export function GateScreen({ onSignedOut }: Props) {
     return () => clearInterval(timer);
   }, [counting]);
 
-  const refresh = useCallback(async (): Promise<void> => {
-    const [nextStatus, nextEvents] = await Promise.all([getStatus(), getAudit()]);
-
-    if ('ok' in nextStatus && nextStatus.ok === false) {
-      if (nextStatus.code === 'SESSION_EXPIRED') { onSignedOut(); return; }
-      setStatus(null);
-    } else {
-      setStatus(nextStatus as GateStatusResponse);
-    }
-
-    if (Array.isArray(nextEvents)) setEvents(nextEvents);
-    setLoadingStatus(false);
+  /**
+   * The activity list only reads the backend's own database, so it is cheap
+   * and safe to pull often.
+   */
+  const refreshActivity = useCallback(async (): Promise<void> => {
+    const events = await getAudit();
+    if (Array.isArray(events)) setEvents(events);
+    else if (events.code === 'SESSION_EXPIRED') onSignedOut();
   }, [onSignedOut]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  /**
+   * This one reaches Shelly Cloud, which is rate limited to one request per
+   * second across the whole backend. Deliberately NOT called after a tap: the
+   * pulse has just spent that slot, and reachability lags by up to a minute
+   * anyway, so a read one second later cannot say anything new -- it would
+   * only fail and make the screen look like the controller had dropped.
+   */
+  const refreshStatus = useCallback(async (): Promise<void> => {
+    const status = await getStatus();
+    if ('ok' in status && status.ok === false && status.code === 'SESSION_EXPIRED') {
+      onSignedOut();
+      return;
+    }
+    setReading(status);
+  }, [onSignedOut]);
+
+  useEffect(() => {
+    void refreshStatus();
+    void refreshActivity();
+  }, [refreshStatus, refreshActivity]);
 
   const onTap = async (): Promise<void> => {
     if (!canTap(state, Date.now())) return;
@@ -84,7 +99,8 @@ export function GateScreen({ onSignedOut }: Props) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
 
-    void refresh();
+    // Activity only. See refreshStatus for why the controller is not re-read.
+    void refreshActivity();
   };
 
   const tappable = canTap(state, now);
@@ -111,14 +127,16 @@ export function GateScreen({ onSignedOut }: Props) {
         <RefreshControl
           refreshing={refreshing}
           tintColor={colors.textDim}
+          // An explicit pull is the user asking, so both are re-read here.
           onRefresh={() => {
             setRefreshing(true);
-            void refresh().finally(() => setRefreshing(false));
+            void Promise.all([refreshStatus(), refreshActivity()])
+              .finally(() => setRefreshing(false));
           }}
         />
       }
     >
-      <StatusPanel status={status} loading={loadingStatus} />
+      <StatusPanel view={controllerView(reading)} />
 
       <Banner state={state} />
 

@@ -9,18 +9,17 @@ interface Props {
 }
 
 /**
- * Honest state, and nothing more.
+ * Controller reachability, and nothing else.
  *
- * Position is always "unknown" today, and it is stated plainly rather than
- * guessed from command history. A gate app that confidently displays "Closed"
- * when it does not know is worse than one that admits ignorance -- someone
- * would drive off trusting it.
+ * Position is deliberately NOT shown. There is no sensor, so the only honest
+ * thing to display would be "unknown" on every single render -- permanent
+ * noise that tells you nothing. Saying nothing about position is still honest:
+ * what the design forbids is CLAIMING a position, and no claim is made
+ * anywhere in this app.
  *
- * Reachability is shown separately because it means something different: the
- * controller answering the cloud is not the gate being in any particular
- * place. It is also a LAGGING indicator -- Shelly Cloud only marks a device
- * offline once its keepalive expires, which takes up to about a minute -- so
- * the time of the reading is shown next to it rather than implied.
+ * Reachability is a LAGGING indicator -- Shelly Cloud only marks a device
+ * offline once its keepalive expires, up to about a minute -- so the time of
+ * the reading is shown beside it rather than implied.
  */
 export function StatusPanel({ status, loading }: Props) {
   const reachable = status?.reachable ?? false;
@@ -30,16 +29,11 @@ export function StatusPanel({ status, loading }: Props) {
 
   return (
     <View style={{ gap: space.sm }}>
-      <Text style={{ ...typography.hero, color: colors.text }}>Position unknown</Text>
-      <Text style={{ ...typography.small, color: colors.textDim }}>
-        There is no position sensor on this gate. It is never guessed.
-      </Text>
-
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         {/* Colour is never the only carrier: the words say it too, for
             colour-blind readers and for a screen glanced at in sunlight. */}
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: dot }} />
-        <Text style={{ ...typography.body, color: colors.text }}>{word}</Text>
+        <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: dot }} />
+        <Text style={{ ...typography.hero, color: colors.text }}>{word}</Text>
       </View>
 
       {status ? (

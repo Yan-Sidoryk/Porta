@@ -13,8 +13,15 @@ interface Props {
   onSignedIn: () => void;
 }
 
-/** Breathing room between the focused field and the top of the keyboard. */
-const KEYBOARD_GAP = 48;
+/**
+ * Clear air between the bottom of the form and the top of the keyboard. Big
+ * enough that the sign-in button is not sitting on the keys -- a form pressed
+ * right up against them reads as cramped even when nothing is covered.
+ */
+const KEYBOARD_GAP = 110;
+
+/** The form never rises past this, so the logo cannot be pushed off-screen. */
+const MIN_TOP_GAP = 24;
 
 /** Matches the gate screen, so the mark does not resize between the two. */
 const LOGO_SIZE = 34;
@@ -78,13 +85,19 @@ export function LoginScreen({ onSignedIn }: Props) {
     const shown = Keyboard.addListener(showEvent, (event) => {
       if (viewport.current === 0) return;
 
-      // The form is centred, so its bottom sits half its height below the
+      // The form is centred, so it sits half its height either side of the
       // middle. Lift only by however much the keyboard actually covers.
-      const formBottom = (viewport.current + formHeight.current) / 2;
+      const formTop = (viewport.current - formHeight.current) / 2;
+      const formBottom = formTop + formHeight.current;
       const keyboardTop = viewport.current - event.endCoordinates.height;
       const overlap = Math.max(0, formBottom + KEYBOARD_GAP - keyboardTop);
 
-      animate(-overlap, event.duration ?? 0);
+      // Capped so the top of the form stays on screen. On a short phone the
+      // keyboard can cover more than there is room to rise, and without this
+      // the logo would be dragged off the top edge.
+      const headroom = Math.max(0, formTop - MIN_TOP_GAP);
+
+      animate(-Math.min(overlap, headroom), event.duration ?? 0);
     });
 
     const hidden = Keyboard.addListener(hideEvent, (event) => {

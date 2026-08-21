@@ -240,17 +240,75 @@ the next time your router hands out a lease. To override — which is what a rea
 build does — set `extra.apiUrl` in `app/app.json`.
 
 Tokens are stored with `expo-secure-store` (iOS keychain / Android keystore),
-never `AsyncStorage`.
+never `AsyncStorage`. A returning user goes straight to the gate screen; only
+the presence of a token is checked at launch, and an expired one is refreshed
+where it surfaces.
 
 The app is pinned to **Expo SDK 54** to match the Expo Go available on the
 target phone.
 
-> **Status:** the app is currently the thin vertical slice from Task 12 — two
-> fields, two buttons, raw JSON results. It proves the wire works. The real UI
-> is the next milestone. It has been verified end to end against the stub from
-> a desktop, but **not yet from a physical phone**; see `PROGRESS.md`.
-
 Expect a Windows Firewall prompt for Node the first time a phone connects.
+
+### The screen
+
+One screen, forced dark, no system theme. One round button, low and centred so
+it falls under a thumb one-handed. It is deliberately not a consumer smart-home
+app: the reference is a key fob or an e-stop panel, because that is what it is.
+
+No gate iconography and no position display. There is no sensor, so any glyph
+or label implying open or closed would be wrong roughly half the time. What is
+shown instead is whether the **controller** is reachable — and even that is a
+lagging indicator, since Shelly only marks a device offline once its keepalive
+expires, up to about a minute. A check that fails reads "Status unavailable",
+never "offline": not reaching the gate service says nothing about the hardware.
+
+After a tap the button disables itself for the cooldown, with the wait counting
+down on the button itself. The duration always comes from the server's
+`retryAfterMs` and is never assumed, so a doubled window after an unconfirmed
+attempt is visible as a longer wait.
+
+### Recent activity
+
+Every gate attempt, successful or not, with who made it. Green worked, amber is
+the gate protecting itself, red is everything that did not happen.
+
+| Label | Colour | Meaning |
+|---|---|---|
+| **Pulse sent** | green | The pulse reached the relay and Shelly confirmed it. |
+| **Repeat tap** | green | The same tap arrived twice inside 60s. The original result was replayed — **no second pulse was sent**. |
+| **Cooling down** | amber | Blocked by the cooldown (doubled after an unconfirmed attempt). Nothing was sent. |
+| **Access denied** | red | Refused: unknown account, no valid grant, or a disabled account. |
+| **Rate limited** | red | Hit the per-user or per-IP request limit — the DoS guard, not the cooldown. |
+| **Controller offline** | red | Shelly says the relay is unreachable. Usually power or Wi-Fi at the pillar. |
+| **Controller refused** | red | Shelly received the command and rejected it. |
+| **Unconfirmed** | red | Shelly did not answer in time. **The pulse may or may not have fired.** |
+| **Unknown failure** | red | Anything else: a backend error, an unregistered device, a malformed request. |
+
+No label claims a physical outcome. The hardware takes one command — a pulse —
+and the R70 cycles open → stop → close → stop, so "Pulse sent" is the most that
+can honestly be said about what happened at the gate.
+
+**Unconfirmed** is the row that matters most. It is the one case where the
+command may have gone through despite the failure, which is why nothing in the
+stack ever retries it automatically.
+
+### Biometric lock
+
+Off by default, in the menu behind the three dots at the top right, alongside
+sign out.
+
+It is not a second factor — the backend only ever sees an access token and this
+check never leaves the phone. What it buys is narrow: it stops someone holding
+your already-unlocked phone from opening the gate. It re-locks on returning
+from the background after a short grace period, not only on a cold start, since
+phone apps are rarely killed.
+
+There are always two ways past that do not depend on the sensor: the device
+passcode, and signing out to use your password. A wet finger or a failed reader
+must never leave you standing outside your own gate.
+
+**Face ID does not work in Expo Go** — it needs a development build. Android
+fingerprint works in Expo Go.
 
 ---
 

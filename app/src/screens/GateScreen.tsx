@@ -264,23 +264,23 @@ export function GateScreen({ onSignedOut }: Props) {
         />
       }
     >
-      {/* The dots share the status line rather than sitting in a bar of their
-          own: one less row of chrome above the only thing that matters.
-          Aligned to the top so they sit level with the headline, not with the
-          middle of the panel once the "checked at" line appears under it. */}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
-        <View style={{ flex: 1 }}>
-          <StatusPanel view={controllerView(reading)} />
+      <View style={{ gap: space.sm }}>
+        {/* The name and the menu share the top line; the controller reading
+            sits under them, smaller, because it changes and the name does not. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Text style={{ ...typography.hero, color: colors.text, flex: 1 }}>Porta</Text>
+          <Pressable
+            onPress={openMenu}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            style={{ padding: space.sm, marginRight: -space.sm }}
+          >
+            <Ionicons name="ellipsis-vertical" size={22} color={colors.textDim} />
+          </Pressable>
         </View>
-        <Pressable
-          onPress={openMenu}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          style={{ padding: space.sm, marginRight: -space.sm }}
-        >
-          <Ionicons name="ellipsis-vertical" size={22} color={colors.textDim} />
-        </Pressable>
+
+        <StatusPanel view={controllerView(reading)} />
       </View>
 
       <Banner message={banner} />

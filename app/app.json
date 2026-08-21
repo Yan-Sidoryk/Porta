@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Gate",
-    "slug": "gate-opener",
+    "name": "Porta",
+    "slug": "porta",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
@@ -12,7 +12,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
-        "backgroundColor": "#45B79A"
+        "backgroundColor": "#E8A33D"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -23,7 +23,7 @@
       "expo-secure-store",
       [
         "expo-local-authentication",
-        { "faceIDPermission": "Allow Gate to use Face ID to unlock the app." }
+        { "faceIDPermission": "Allow Porta to use Face ID to unlock the app." }
       ],
       [
         "expo-splash-screen",

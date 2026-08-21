@@ -1,4 +1,4 @@
-# Smart gate opener
+# Porta
 
 Opens and closes a physical driveway gate from a phone.
 

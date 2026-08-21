@@ -32,15 +32,12 @@ export function StatusPanel({ view }: Props) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         {/* Colour is never the only carrier: the words say it too, for
             colour-blind readers and for a screen glanced at in sunlight. */}
-        <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: dot }} />
-        {/* Shrinks rather than wrapping: the settings button shares this row,
-            and "Controller offline" at full size would otherwise break onto a
-            second line and shove the whole screen down. */}
+        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: dot }} />
+        {/* Subordinate to the app name above it: this line changes, the name
+            does not, and the button below is what the eye should land on. */}
         <Text
           numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.7}
-          style={{ ...typography.hero, color: colors.text, flexShrink: 1 }}
+          style={{ ...typography.title, color: colors.text, flexShrink: 1 }}
         >
           {headline}
         </Text>

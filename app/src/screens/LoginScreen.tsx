@@ -74,7 +74,7 @@ export function LoginScreen({ onSignedIn }: Props) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
-        <Text style={{ ...typography.hero, color: colors.text }}>Gate</Text>
+        <Text style={{ ...typography.hero, color: colors.text }}>Porta</Text>
         <Text style={{ ...typography.small, color: colors.textDim, marginBottom: space.md }}>
           Sign in to operate the gate.
         </Text>

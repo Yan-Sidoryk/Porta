@@ -55,3 +55,12 @@ export const type = {
 export const space = {
   xs: 4, sm: 8, md: 16, lg: 24, xl: 32,
 } as const;
+
+/**
+ * Gap between the safe area and the top of a screen's content.
+ *
+ * Shared rather than written twice: the settings menu reconstructs where the
+ * header sits so its blur can start below it, and if the two drifted apart
+ * the blur would cut through the app name.
+ */
+export const screenTopPadding = space.xl;

@@ -17,7 +17,7 @@ import {
   authenticate, checkAvailability, isLockEnabled, setLockEnabled, type Availability,
 } from '../biometrics';
 import { getUse24h, setUse24h } from '../settings';
-import { colors, space, type as typography } from '../theme';
+import { colors, screenTopPadding, space, type as typography } from '../theme';
 
 interface Props {
   onSignedOut: () => void;
@@ -109,24 +109,18 @@ export function GateScreen({ onSignedOut }: Props) {
   };
 
   /**
-   * Where the blur starts, in window coordinates: the bottom of the header.
-   * Measured at open time rather than assumed, because the header sits below
-   * a safe-area inset that differs on every device.
+   * The header's HEIGHT, not its position.
+   *
+   * The menu rebuilds where the header ends from this plus the safe-area
+   * inset and the shared top padding. Measuring the position instead would
+   * mean comparing window coordinates against a status-bar-translucent
+   * Modal's own origin, and the two do not share an origin on Android -- the
+   * blur ended up a status bar's height too high, cutting through the name.
+   * A height is the same number in every coordinate space.
    */
-  const headerRef = useRef<View>(null);
-  const [blurTop, setBlurTop] = useState(0);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
-  const openMenu = (): void => {
-    const header = headerRef.current;
-    if (!header) {
-      setMenuOpen(true);
-      return;
-    }
-    header.measureInWindow((_x, y, _width, height) => {
-      setBlurTop(y + height);
-      setMenuOpen(true);
-    });
-  };
+  const openMenu = (): void => setMenuOpen(true);
 
   /**
    * Turning the lock ON prompts first and only saves if the prompt succeeds.
@@ -260,7 +254,7 @@ export function GateScreen({ onSignedOut }: Props) {
     <SettingsMenu
       visible={menuOpen}
       onClose={() => setMenuOpen(false)}
-      blurTop={blurTop}
+      headerHeight={headerHeight}
       biometricOn={biometricOn}
       biometricBlockedReason={availability && !availability.available ? availability.reason : null}
       busy={togglingLock}
@@ -275,7 +269,7 @@ export function GateScreen({ onSignedOut }: Props) {
 
     <ScrollView
       style={{ flex: 1 }}
-      contentContainerStyle={{ padding: space.lg, paddingTop: space.xl, gap: space.lg }}
+      contentContainerStyle={{ padding: space.lg, paddingTop: screenTopPadding, gap: space.lg }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -298,7 +292,10 @@ export function GateScreen({ onSignedOut }: Props) {
       <View style={{ gap: space.sm }}>
         {/* The name and the menu share the top line; the controller reading
             sits under them, smaller, because it changes and the name does not. */}
-        <View ref={headerRef} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <View
+          onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}
+        >
           <Image
             source={require('../../assets/logo.png')}
             accessibilityIgnoresInvertColors
@@ -374,4 +371,5 @@ function Banner({ message }: { message: BannerMessage | null }) {
     </View>
   );
 }
+
 

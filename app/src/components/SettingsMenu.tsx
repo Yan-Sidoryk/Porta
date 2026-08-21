@@ -1,13 +1,14 @@
 import { Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, space, type as typography } from '../theme';
+import { colors, screenTopPadding, space, type as typography } from '../theme';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  /** Window y of the header's bottom edge: everything above stays sharp. */
-  blurTop: number;
+  /** Measured height of the header row. See where blurTop is derived below. */
+  headerHeight: number;
   biometricOn: boolean;
   /** Why the toggle is unavailable, shown under it. */
   biometricBlockedReason: string | null;
@@ -26,9 +27,19 @@ interface Props {
  * it. No navigation library involved.
  */
 export function SettingsMenu({
-  visible, onClose, blurTop, biometricOn, biometricBlockedReason,
+  visible, onClose, headerHeight, biometricOn, biometricBlockedReason,
   busy, onToggleBiometric, use24h, onToggle24h, onSignOut,
 }: Props) {
+  /**
+   * Rebuilt in the modal's own coordinate space rather than measured in the
+   * screen's. This modal is status-bar-translucent, so it starts at the very
+   * top of the display; the header behind it starts below the safe-area inset
+   * and the screen's top padding. Adding those to the header's height lands on
+   * its bottom edge exactly, with no cross-coordinate-space guesswork.
+   */
+  const insets = useSafeAreaInsets();
+  const blurTop = insets.top + screenTopPadding + headerHeight;
+
   return (
     <Modal
       visible={visible}

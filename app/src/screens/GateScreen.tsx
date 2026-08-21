@@ -228,25 +228,6 @@ export function GateScreen({ onSignedOut }: Props) {
 
   return (
     <>
-    <View
-      style={{
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        paddingHorizontal: space.md,
-        paddingTop: space.sm,
-      }}
-    >
-      <Pressable
-        onPress={openMenu}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel="Settings"
-        style={{ padding: space.sm }}
-      >
-        <Ionicons name="ellipsis-vertical" size={22} color={colors.textDim} />
-      </Pressable>
-    </View>
-
     <SettingsMenu
       visible={menuOpen}
       onClose={() => setMenuOpen(false)}
@@ -283,7 +264,24 @@ export function GateScreen({ onSignedOut }: Props) {
         />
       }
     >
-      <StatusPanel view={controllerView(reading)} />
+      {/* The dots share the status line rather than sitting in a bar of their
+          own: one less row of chrome above the only thing that matters.
+          Aligned to the top so they sit level with the headline, not with the
+          middle of the panel once the "checked at" line appears under it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+        <View style={{ flex: 1 }}>
+          <StatusPanel view={controllerView(reading)} />
+        </View>
+        <Pressable
+          onPress={openMenu}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          style={{ padding: space.sm, marginRight: -space.sm }}
+        >
+          <Ionicons name="ellipsis-vertical" size={22} color={colors.textDim} />
+        </Pressable>
+      </View>
 
       <Banner message={banner} />
 

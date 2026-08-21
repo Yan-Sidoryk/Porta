@@ -33,7 +33,17 @@ export function StatusPanel({ view }: Props) {
         {/* Colour is never the only carrier: the words say it too, for
             colour-blind readers and for a screen glanced at in sunlight. */}
         <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: dot }} />
-        <Text style={{ ...typography.hero, color: colors.text }}>{headline}</Text>
+        {/* Shrinks rather than wrapping: the settings button shares this row,
+            and "Controller offline" at full size would otherwise break onto a
+            second line and shove the whole screen down. */}
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+          style={{ ...typography.hero, color: colors.text, flexShrink: 1 }}
+        >
+          {headline}
+        </Text>
       </View>
 
       {view.kind === 'online' || view.kind === 'offline' ? (

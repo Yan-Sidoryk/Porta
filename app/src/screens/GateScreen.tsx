@@ -20,6 +20,23 @@ interface Props {
 /** Fast enough for a countdown to look live, slow enough to be free. */
 const TICK_MS = 250;
 
+/** How long a result message stays before clearing itself. Tune to taste. */
+const BANNER_VISIBLE_MS = 10_000;
+
+/**
+ * Space the message strip always occupies, whether it holds nothing, one line
+ * or three. Reserved so the button below never moves: a control that shifts
+ * under a thumb as a message arrives is how a second tap gets sent by accident.
+ * A minimum rather than a fixed height, so large accessibility text grows
+ * instead of being clipped.
+ */
+const BANNER_MIN_HEIGHT = 80;
+
+interface BannerMessage {
+  text: string;
+  tone: string;
+}
+
 export function GateScreen({ onSignedOut }: Props) {
   const [state, setState] = useState<GateUiState>({ kind: 'idle' });
   /** null until the first read lands -- rendered as "checking", not "offline". */
@@ -35,6 +52,34 @@ export function GateScreen({ onSignedOut }: Props) {
    * stops a moving gate.
    */
   const tapId = useRef<string | null>(null);
+
+  /**
+   * The message strip is its own state, deliberately not derived from
+   * `state`. Dismissing a message must never touch the cooldown -- if the two
+   * shared a value, a banner timing out after 10s would re-enable the button
+   * in the middle of a 20s post-timeout window.
+   */
+  const [banner, setBanner] = useState<BannerMessage | null>(null);
+  const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopBannerTimer = (): void => {
+    if (bannerTimer.current !== null) {
+      clearTimeout(bannerTimer.current);
+      bannerTimer.current = null;
+    }
+  };
+
+  /** `sticky` messages stay until replaced -- used while a pulse is in flight. */
+  const showBanner = (text: string, tone: string, sticky = false): void => {
+    stopBannerTimer();
+    setBanner({ text, tone });
+    if (!sticky) {
+      bannerTimer.current = setTimeout(() => setBanner(null), BANNER_VISIBLE_MS);
+    }
+  };
+
+  // Leaving the screen must not fire a setState later.
+  useEffect(() => stopBannerTimer, []);
 
   // Only ticks while something is counting down, so an idle screen is not
   // waking the JS thread four times a second.
@@ -82,11 +127,25 @@ export function GateScreen({ onSignedOut }: Props) {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     tapId.current ??= Crypto.randomUUID();
     setState({ kind: 'sending' });
+    showBanner('Sending the pulse...', colors.textDim, true);
 
     const reply = await trigger(tapId.current);
     const at = Date.now();
     setNow(at);
-    setState(nextState(reply, at));
+
+    const ui = nextState(reply, at);
+    setState(ui);
+
+    if (ui.kind === 'sending') {
+      // ATTEMPT_IN_PROGRESS: the earlier tap is still running. Not an error,
+      // and it stays put rather than timing out, because the honest thing to
+      // show is that work is still outstanding.
+      showBanner('Still sending -- your earlier tap is on its way', colors.textDim, true);
+    } else if (ui.kind === 'success') {
+      showBanner(ui.replayed ? 'Already sent -- not repeated' : 'Pulse sent', colors.ok);
+    } else if (ui.kind === 'error') {
+      showBanner(ui.message, colors.danger);
+    }
 
     if (tapIsFinished(reply)) tapId.current = null;
 
@@ -129,6 +188,12 @@ export function GateScreen({ onSignedOut }: Props) {
           tintColor={colors.textDim}
           // An explicit pull is the user asking, so both are re-read here.
           onRefresh={() => {
+            stopBannerTimer();
+            setBanner(null);
+            // Also un-sticks a screen left in `sending` by an
+            // ATTEMPT_IN_PROGRESS, which otherwise has nothing to resolve it.
+            // Safe: the backend guard still rejects a genuinely early tap.
+            setState((current) => (current.kind === 'sending' ? { kind: 'idle' } : current));
             setRefreshing(true);
             void Promise.all([refreshStatus(), refreshActivity()])
               .finally(() => setRefreshing(false));
@@ -138,7 +203,7 @@ export function GateScreen({ onSignedOut }: Props) {
     >
       <StatusPanel view={controllerView(reading)} />
 
-      <Banner state={state} />
+      <Banner message={banner} />
 
       {/* Low and centred: within thumb reach one-handed, which is how this is
           actually used -- standing at a gate, often in the rain. */}
@@ -165,31 +230,30 @@ export function GateScreen({ onSignedOut }: Props) {
 }
 
 /**
- * The message strip. `sending` is not an error and neither is
- * ATTEMPT_IN_PROGRESS, which the machine already folds into `sending`.
+ * The message strip.
+ *
+ * The outer view always occupies BANNER_MIN_HEIGHT, empty or not, so nothing
+ * below it moves as messages come and go. Three lines are allowed before
+ * truncation, which every message in gate-machine.ts fits inside.
  */
-function Banner({ state }: { state: GateUiState }) {
-  if (state.kind === 'idle') return null;
-
-  const tone = state.kind === 'error' ? colors.danger
-    : state.kind === 'success' ? colors.ok
-      : colors.textDim;
-
-  const text = state.kind === 'sending' ? 'Sending the pulse...'
-    : state.kind === 'success' ? (state.replayed ? 'Already sent -- not repeated' : 'Pulse sent')
-      : state.message;
-
+function Banner({ message }: { message: BannerMessage | null }) {
   return (
-    <View
-      style={{
-        borderLeftWidth: 4,
-        borderLeftColor: tone,
-        backgroundColor: colors.surface,
-        padding: space.md,
-        borderRadius: 8,
-      }}
-    >
-      <Text style={{ ...typography.body, color: colors.text }}>{text}</Text>
+    <View style={{ minHeight: BANNER_MIN_HEIGHT, justifyContent: 'center' }}>
+      {message ? (
+        <View
+          style={{
+            borderLeftWidth: 4,
+            borderLeftColor: message.tone,
+            backgroundColor: colors.surface,
+            padding: space.md,
+            borderRadius: 8,
+          }}
+        >
+          <Text numberOfLines={3} style={{ ...typography.body, color: colors.text }}>
+            {message.text}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

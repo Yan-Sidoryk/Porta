@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import {
-  ActivityIndicator, Image, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Image, KeyboardAvoidingView,
   Pressable, ScrollView, Text, TextInput, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,7 +64,11 @@ export function LoginScreen({ onSignedIn }: Props) {
     // gap: without it the focused input sits flush against the keyboard.
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      // 'padding' on both platforms, not 'height' on Android. Height resizes
+      // the container in a single step, which is what made the fields appear
+      // to teleport; padding is animated with the keyboard's own duration.
+      behavior="padding"
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={{

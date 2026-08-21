@@ -6,6 +6,16 @@
  * a phone. One appearance, always, so the screen is never a surprise when it
  * is opened in a dark car at night -- which is the real usage context.
  */
+/**
+ * The brand amber, sampled from logo.png rather than eyeballed.
+ *
+ * The logo is the fixed point -- it lands on the home screen and the splash,
+ * where nothing can adjust it -- so the theme follows it. Two ambers a few
+ * percent apart read as a mistake rather than as a palette, which is exactly
+ * how the earlier #E8A33D was spotted next to the icon.
+ */
+const AMBER = '#EA971F';
+
 export const colors = {
   background: '#0B0D0F',
   surface: '#16191D',
@@ -21,12 +31,15 @@ export const colors = {
    * heavy machinery. Amber reads as "armed, act deliberately", which is
    * exactly right for a control that starts a gate moving.
    */
-  action: '#E8A33D',
-  actionPressed: '#C4862B',
+  action: AMBER,
+  /** The same step darker the previous pressed state was: roughly 82%. */
+  actionPressed: '#C67C16',
   actionDisabled: '#3A3B38',
 
   ok: '#5FB878',
-  warn: '#E8A33D',
+  // Deliberately the same value, not a near-miss: a warning amber sitting a
+  // few percent off the brand amber would look like a rendering fault.
+  warn: AMBER,
   danger: '#E5544B',
 } as const;
 

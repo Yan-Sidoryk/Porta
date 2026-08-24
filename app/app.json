@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.yansidoryk.porta",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#EA971F"
@@ -23,7 +24,9 @@
       "expo-secure-store",
       [
         "expo-local-authentication",
-        { "faceIDPermission": "Allow Porta to use Face ID to unlock the app." }
+        {
+          "faceIDPermission": "Allow Porta to use Face ID to unlock the app."
+        }
       ],
       [
         "expo-splash-screen",
@@ -33,7 +36,21 @@
           "resizeMode": "contain",
           "backgroundColor": "#0B0D0F"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
-    ]
+    ],
+    "owner": "yan_chik",
+    "extra": {
+      "eas": {
+        "projectId": "75e2ac17-4f54-4101-bcd5-56176c155763"
+      }
+    }
   }
 }

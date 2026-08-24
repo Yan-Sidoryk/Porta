@@ -8,11 +8,12 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: milestones 1–7 built. Final review and deployment remain.
+## Status: milestones 1–7 built and deployed. Final review remains.
 
-The backend, the app and both documents are done. What is left is a
-fresh-context review of the whole thing, one measurement that needs the relay
-powered, and putting the backend somewhere that runs 24/7. See **Next**.
+The backend, the app and both documents are done, and the backend is live at
+`https://porta-app.duckdns.org`. What is left is a fresh-context review of the
+whole thing, pinning one reachability path now that the measurement exists, and
+a gate pulse from a real build. See **Next**.
 
 Branch: `build/gate-opener-backend`
 
@@ -182,19 +183,36 @@ system plus a full suite run. Not yet done. The app in particular has never had
 a review — it was built conversationally.
 
 **2. Pin the reachability path.** `findOnline` in `state-adapter.ts` still
-searches the Shelly response for `online` at any depth. Confirmed working in
-both directions against real hardware, but that proved the *walk* works, not
-*where the flag lives*. It returns true if `online` is truthy anywhere in the
-payload, and the false-positive direction is the dangerous one. **Needs the
-relay powered:** run `npm run probe-shelly -w backend` — read-only, it calls
-`get` and never `set/switch` — then replace the walk with the exact path.
+searches the Shelly response for `online` at any depth. It returns true if
+`online` is truthy anywhere in the payload, and the false-positive direction is
+the dangerous one.
 
-**3. Deployment.** The backend still only runs on a dev machine on the LAN. A
-gate is opened from a car on mobile data, so it needs a public address and TLS.
-A small VPS is the shorter path than a box at home: the backend talks to Shelly
-*Cloud*, not to the relay, so it gains nothing from being on the gate's network
-— unless a local-control adapter is ever fitted, which would reverse that.
-`README.md` has the TLS deployment steps.
+**The measurement now exists** — `probe-shelly` was run against the powered
+relay from the deployed host on 2026-08-24, and `/v2/devices/api/get` answers
+with a flat array of device objects:
+
+```json
+[{ "id": "e4b0636c53c8", "type": "relay", "code": "S4SW-001X16EU",
+   "gen": "G2", "online": 1 }]
+```
+
+So the flag is `body[0].online`, at the top level of each device object, as an
+integer `0`/`1` rather than a boolean. Both directions were seen: `0` while the
+relay was unplugged, `1` once powered. The walk can be replaced with that exact
+path, matching the device by `id` rather than by position.
+
+**3. Deployment — done, but never pulsed.** The backend is live at
+`https://porta-app.duckdns.org`, on a free Oracle Cloud VM in `eu-frankfurt-1`
+under systemd, behind Caddy for TLS. `docs/DEPLOY.md` is the runbook.
+
+Login, `/gate/status` and Shelly Cloud reachability are all verified end to end
+from the public internet. **`/gate/trigger` has never been called against the
+deployed backend** — that moves a real gate, so it waits for someone standing
+where they can see it, from an installed build rather than a terminal.
+
+Two follow-ups the host needs: the Oracle account must be upgraded to Pay As
+You Go or idle reclamation will stop an instance this quiet, and the nightly
+`gate.db` backups live on the same volume and need pulling off-box.
 
 **4. Per-user activity filtering, parked by the owner.** `GET /audit` returns
 every user's attempts, with emails, to any signed-in user. Deliberate — SPEC.md

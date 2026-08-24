@@ -36,14 +36,6 @@
           "resizeMode": "contain",
           "backgroundColor": "#0B0D0F"
         }
-      ],
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "usesCleartextTraffic": true
-          }
-        }
       ]
     ],
     "owner": "yan_chik",

@@ -27,7 +27,16 @@ export function buildApp(
   container: Container,
   { logger = false, allowCors = false }: AppOptions = {},
 ): FastifyInstance {
-  const app = Fastify({ logger, bodyLimit: BODY_LIMIT_BYTES });
+  // Caddy reaches this process over 127.0.0.1, so `X-Forwarded-For` is only
+  // believed when the connection itself is loopback. Without this every
+  // request reads as 127.0.0.1 and the per-IP rate limits collapse into one
+  // shared bucket -- ten bad logins would lock out every account.
+  //
+  // `'loopback'` rather than a numeric hop count: the number form trusts by
+  // position and resolved to 127.0.0.1 here, silently doing nothing. This
+  // form also means a request arriving on any non-loopback socket is keyed on
+  // that socket, so a forged header buys an attacker nothing.
+  const app = Fastify({ logger, bodyLimit: BODY_LIMIT_BYTES, trustProxy: 'loopback' });
 
   if (allowCors) {
     // Reflects the request origin: a dev machine's LAN address changes with

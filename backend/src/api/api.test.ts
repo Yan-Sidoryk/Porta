@@ -245,6 +245,23 @@ describe('POST /auth/login', () => {
     for (let i = 0; i < AUTH_RATE_LIMIT; i += 1) await attempt();
     expect((await attempt()).statusCode).toBe(429);
   });
+
+  // Behind Caddy every request arrives from 127.0.0.1. If `trustProxy` is off
+  // the per-IP bucket is shared by everyone, and one attacker exhausting it
+  // locks out every other address -- so this asserts the buckets are distinct.
+  it('keys the per-IP limit on the forwarded address, not the proxy', async () => {
+    const from = (ip: string, email: string) => app.inject({
+      method: 'POST', url: '/auth/login',
+      headers: { 'x-forwarded-for': ip },
+      payload: { email, password: 'wrong' },
+    });
+    for (let i = 0; i < AUTH_RATE_LIMIT; i += 1) await from('203.0.113.1', owner.email);
+
+    // Same address, fresh account: the IP bucket is spent.
+    expect((await from('203.0.113.1', guest.email)).statusCode).toBe(429);
+    // Different address: unaffected by the first client's spending.
+    expect((await from('203.0.113.9', guest.email)).statusCode).not.toBe(429);
+  });
 });
 
 describe('POST /auth/refresh', () => {

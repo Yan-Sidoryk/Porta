@@ -1,4 +1,4 @@
-# Porta
+# <img src="docs/logo-rounded.png" alt="" width="24"> Porta
 
 Opens and closes a physical driveway gate from a phone.
 

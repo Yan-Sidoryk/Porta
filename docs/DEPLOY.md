@@ -13,13 +13,13 @@ grants work once it is running. This covers only getting it onto a host.
 
 | | |
 |---|---|
-| Host | `129.159.222.134` (Oracle Cloud, `eu-frankfurt-1`) |
+| Host | Oracle Cloud, `eu-frankfurt-1` — reserved public IP, in the console under Instances |
 | Shape | `VM.Standard.E2.1.Micro` — x86_64, 2 vCPU (1/8 OCPU baseline), 1 GB RAM |
 | URL | `https://porta-app.duckdns.org` |
 | OS | Ubuntu 24.04 LTS |
 | Runtime | Node 24 |
 | TLS | Caddy 2, automatic Let's Encrypt |
-| SSH | `ssh -i ~/.ssh/oracle.key ubuntu@129.159.222.134` |
+| SSH | `ssh -i ~/.ssh/oracle.key ubuntu@<host-ip>` |
 
 Ampere A1 was out of capacity at launch time, hence the AMD micro shape. It is
 enough: the backend idles at roughly 100 MB and serves a few dozen requests a
@@ -51,7 +51,7 @@ account with no shell, and the systemd unit gives it exactly one writable path.
 ## Redeploying a change
 
 ```bash
-ssh -i ~/.ssh/oracle.key ubuntu@129.159.222.134
+ssh -i ~/.ssh/oracle.key ubuntu@<host-ip>
 cd /opt/porta && git pull \
   && npm ci -w shared -w backend --include-workspace-root \
   && npm run build -w shared && npm run build -w backend \
@@ -159,9 +159,9 @@ These copies live on the same volume, which does not survive losing the
 tenancy. Pull one down periodically:
 
 ```bash
-ssh -i ~/.ssh/oracle.key ubuntu@129.159.222.134 \
+ssh -i ~/.ssh/oracle.key ubuntu@<host-ip> \
   'sudo cp /var/lib/porta/gate.db /tmp/gate-backup.db && sudo chown ubuntu /tmp/gate-backup.db'
-scp -i ~/.ssh/oracle.key ubuntu@129.159.222.134:/tmp/gate-backup.db .
+scp -i ~/.ssh/oracle.key ubuntu@<host-ip>:/tmp/gate-backup.db .
 ```
 
 The copy step is needed because `/var/lib/porta` is `750` and `scp` runs as

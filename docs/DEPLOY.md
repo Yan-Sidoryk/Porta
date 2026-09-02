@@ -246,7 +246,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N ''
 printf 'Host github.com\n  IdentityFile ~/.ssh/github_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
 chmod 600 ~/.ssh/config
 cat ~/.ssh/github_deploy.pub
-git clone git@github.com:Yan-Sidoryk/Automatic-Door-app.git /opt/porta
+git clone git@github.com:Yan-Sidoryk/Porta.git /opt/porta
 ```
 
 **5. Build.**

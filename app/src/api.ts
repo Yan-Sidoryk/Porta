@@ -85,7 +85,22 @@ const withAuth = (init: RequestInit, token: string | null): RequestInit => ({
   headers: { ...JSON_HEADERS, ...(token ? { authorization: `Bearer ${token}` } : {}) },
 });
 
-async function refreshSession(): Promise<boolean> {
+/**
+ * One refresh at a time, shared by everything waiting on it.
+ *
+ * The backend rotates single-use, so two 401s racing here spend the same
+ * token: one wins, and the loser's failure clears the keystore the winner
+ * just filled. GateScreen asks for status and activity together on mount, so
+ * that race was every cold start past the access token's 15 minutes.
+ */
+let inFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  inFlight ??= doRefresh().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) return false;
 

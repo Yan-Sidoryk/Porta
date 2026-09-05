@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { GateStatusResponse } from '@gate/shared';
 import {
-  canTap, cooldownProgress, formatAge, formatClock, formatStamp, gateStatusView,
-  isAwaitingReading, messageFor, nextState, secondsLeft, shouldRelock, tapIsFinished,
-  type GateUiState,
+  canTap, controllerView, cooldownProgress, formatClock, formatStamp,
+  isAwaitingReading, messageFor, nextState, positionBanner, secondsLeft, shouldRelock,
+  tapIsFinished, type GateUiState,
 } from './gate-machine';
 
 const NOW = 1_700_000_000_000;
@@ -108,105 +108,122 @@ describe('shouldRelock', () => {
   });
 });
 
-describe('gateStatusView', () => {
+describe('controllerView', () => {
   const CHECKED = '2026-08-21T10:00:00.000Z';
-  const NOW_MS = new Date(CHECKED).getTime();
   const reading = (over: Partial<GateStatusResponse>): GateStatusResponse => ({
     position: 'unknown', reachable: true, checkedAt: CHECKED, lastReading: null, ...over,
   });
 
-  it('reports a measured position, and never calls not_closed "Open"', () => {
-    expect(gateStatusView(reading({ position: 'closed' }), NOW_MS))
-      .toMatchObject({ kind: 'closed', headline: 'Closed', checkedAt: CHECKED });
+  const seen = { position: 'closed' as const, at: CHECKED };
 
-    // The whole point of the union. A gate stopped mid-travel, standing open,
-    // and jammed on one leaf are the same reading -- "Open" would be a claim
-    // about three situations and wrong in two.
-    const notClosed = gateStatusView(reading({ position: 'not_closed' }), NOW_MS);
-    expect(notClosed).toMatchObject({ kind: 'not-closed', headline: 'Not closed' });
-    expect(JSON.stringify(notClosed)).not.toMatch(/open/i);
+  it('reports online and offline from a real reading', () => {
+    expect(controllerView(reading({ reachable: true, position: 'closed', lastReading: seen })))
+      .toEqual({ kind: 'online', seen: { at: CHECKED, current: true } });
+    expect(controllerView(reading({ reachable: false, lastReading: seen })))
+      .toEqual({ kind: 'offline', seen: { at: CHECKED, current: false } });
   });
 
-  it('adds the age of the last reading once the current one goes stale', () => {
-    const view = gateStatusView(
-      reading({ position: 'unknown', lastReading: { position: 'closed', at: CHECKED } }),
-      NOW_MS + 12 * 60_000,
-    );
-    expect(view.headline).toBe('Unknown');
-    expect(view.note).toBe('Last seen closed 12 minutes ago.');
+  it('only says "Checked" while the reading is still being stood behind', () => {
+    // The stamp is when a reading was last CONFIRMED, not when we last tried.
+    // An unreachable controller labelled "Checked 15:02" claims a check that
+    // had in fact just failed.
+    const offline = controllerView(reading({ reachable: false, lastReading: seen }));
+    const stale = controllerView(reading({ reachable: true, lastReading: seen }));
+    const live = controllerView(reading({ reachable: true, position: 'closed', lastReading: seen }));
+
+    expect(offline.kind === 'offline' && offline.seen?.current).toBe(false);
+    // Online but stale counts too: the poll answered, the contact did not.
+    expect(stale.kind === 'online' && stale.seen?.current).toBe(false);
+    expect(live.kind === 'online' && live.seen?.current).toBe(true);
   });
 
-  it('says the controller is offline rather than guessing at the gate', () => {
-    const view = gateStatusView(
+  it('shows no time at all when no reading has ever been taken', () => {
+    // checkedAt falls back to "now" with nothing recorded, and printing it
+    // would date a reading that never happened.
+    const view = controllerView(reading({ lastReading: null }));
+    expect(view.kind === 'online' && view.seen).toBeNull();
+  });
+
+  // The bug this exists to prevent: a failed CHECK is not an offline
+  // CONTROLLER, and saying so is a claim about hardware we never reached.
+  it('never reports offline when the check itself failed', () => {
+    expect(controllerView({ ok: false, code: 'RATE_LIMITED', message: 'x' }).kind)
+      .toBe('unreadable');
+    expect(controllerView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' }).kind)
+      .toBe('unreadable');
+  });
+
+  it('is checking, not offline, before the first reading lands', () => {
+    expect(controllerView(null)).toEqual({ kind: 'checking' });
+  });
+});
+
+describe('positionBanner', () => {
+  const CHECKED = '2026-08-21T10:00:00.000Z';
+  const reading = (over: Partial<GateStatusResponse>): GateStatusResponse => ({
+    position: 'unknown', reachable: true, checkedAt: CHECKED, lastReading: null, ...over,
+  });
+
+  it('reads at a glance: CLOSED green, OPEN amber, UNKNOWN muted', () => {
+    expect(positionBanner(reading({ position: 'closed' })))
+      .toEqual({ text: 'CLOSED', tone: 'ok' });
+
+    // 'not_closed' renders OPEN deliberately -- see the doc comment. The
+    // precise word survives on the wire; the driver gets the readable one.
+    expect(positionBanner(reading({ position: 'not_closed' })))
+      .toEqual({ text: 'OPEN', tone: 'warn' });
+
+    expect(positionBanner(reading({ position: 'unknown' })))
+      .toEqual({ text: 'UNKNOWN', tone: 'muted' });
+  });
+
+  it('greys the last reading and labels it rather than dropping it', () => {
+    // More useful than a bare UNKNOWN and no less honest: the word is what we
+    // last saw, and the grey plus the label both say we no longer stand
+    // behind it. Two carriers, so the doubt survives a colour-blind reader.
+    expect(positionBanner(reading({ lastReading: { position: 'closed', at: CHECKED } })))
+      .toEqual({ label: 'LAST SEEN', text: 'CLOSED', tone: 'muted' });
+
+    expect(positionBanner(reading({ lastReading: { position: 'not_closed', at: CHECKED } })))
+      .toEqual({ label: 'LAST SEEN', text: 'OPEN', tone: 'muted' });
+  });
+
+  it('keeps the position out of the wrapping half of the line', () => {
+    // "LAST SEEN CLOSED" as one hero-sized string wraps wherever the phone is
+    // narrow and could land as "LAST" / "SEEN CLOSED". The word that answers
+    // the question has to be the one that stays whole.
+    const banner = positionBanner(reading({ lastReading: { position: 'closed', at: CHECKED } }));
+    expect(banner.text).toBe('CLOSED');
+    expect(banner.text).not.toContain(' ');
+  });
+
+  it('repeats neither why the reading is unconfirmed nor when it was taken', () => {
+    // StatusPanel above carries both -- "Controller offline" and
+    // "Last seen 21:34". Saying either twice makes the screen slower to read,
+    // which is the one thing this element cannot afford.
+    expect(positionBanner(
       reading({ reachable: false, lastReading: { position: 'closed', at: CHECKED } }),
-      NOW_MS,
-    );
-    expect(view.headline).toBe('Unknown');
-    expect(view.note).toBe('Controller offline.');
+    )).toEqual({ label: 'LAST SEEN', text: 'CLOSED', tone: 'muted' });
+  });
+
+  it('falls back to UNKNOWN when there is nothing to have last seen', () => {
+    expect(positionBanner(reading({ lastReading: null })))
+      .toEqual({ text: 'UNKNOWN', tone: 'muted' });
   });
 
   // The bug this exists to prevent: showing the last cached position, with no
-  // age on it, when the app could not reach the backend at all.
+  // mark on it, when the app could not reach the backend at all.
   it('reports unknown when the check itself failed, never a cached value', () => {
-    const noNetwork = gateStatusView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' }, NOW_MS);
-    const other = gateStatusView({ ok: false, code: 'INTERNAL', message: 'x' }, NOW_MS);
-
-    expect(noNetwork).toMatchObject({ kind: 'unknown', headline: 'Unknown' });
-    expect(other.kind).toBe('unknown');
-    expect(noNetwork.checkedAt).toBeUndefined();
-    expect(noNetwork.note).not.toBe(other.note);
+    // No response means no reading at all, not even a stale one to mark
+    // doubtful. StatusPanel carries the reason.
+    expect(positionBanner({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' }))
+      .toEqual({ text: 'UNKNOWN', tone: 'muted' });
+    expect(positionBanner({ ok: false, code: 'INTERNAL', message: 'x' }))
+      .toEqual({ text: 'UNKNOWN', tone: 'muted' });
   });
 
   it('is checking, not unknown, before the first reading lands', () => {
-    expect(gateStatusView(null, NOW_MS)).toEqual({ kind: 'checking', headline: 'Checking...' });
-  });
-});
-
-describe('isAwaitingReading', () => {
-  const reading = (over: Partial<GateStatusResponse>): GateStatusResponse => ({
-    position: 'unknown', reachable: true,
-    checkedAt: '2026-08-21T10:00:00.000Z', lastReading: null, ...over,
-  });
-
-  it('keeps asking while the gate is mid-answer, and stops once it lands', () => {
-    // The tap-then-watch case: the refresh fired straight after a pulse can
-    // only say unknown, and without this the screen would sit on it.
-    expect(isAwaitingReading(reading({ position: 'unknown' }))).toBe(true);
-
-    expect(isAwaitingReading(reading({ position: 'closed' }))).toBe(false);
-    expect(isAwaitingReading(reading({ position: 'not_closed' }))).toBe(false);
-  });
-
-  it('does not retry a backend it could not reach', () => {
-    // A different problem from a moving gate, and a three-second timer aimed
-    // at something already known to be down is a retry storm. Foreground and
-    // pull-to-refresh still cover it.
-    expect(isAwaitingReading({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' })).toBe(false);
-    expect(isAwaitingReading({ ok: false, code: 'INTERNAL', message: 'x' })).toBe(false);
-  });
-
-  it('does not start before the first reading has landed', () => {
-    // Mount already fetches; a second request racing it buys nothing.
-    expect(isAwaitingReading(null)).toBe(false);
-  });
-});
-
-describe('formatAge', () => {
-  const AT = '2026-08-21T10:00:00.000Z';
-  const age = (ms: number): string => formatAge(AT, new Date(AT).getTime() + ms);
-
-  it('rounds down to the largest whole unit', () => {
-    expect(age(0)).toBe('just now');
-    expect(age(59_000)).toBe('just now');
-    expect(age(60_000)).toBe('1 minute ago');
-    expect(age(12 * 60_000)).toBe('12 minutes ago');
-    expect(age(59 * 60_000 + 59_000)).toBe('59 minutes ago');
-    expect(age(60 * 60_000)).toBe('1 hour ago');
-    expect(age(25 * 60 * 60_000)).toBe('1 day ago');
-  });
-
-  it('never reports a negative age from a clock that ran backwards', () => {
-    expect(age(-5_000)).toBe('just now');
+    expect(positionBanner(null)).toEqual({ text: 'CHECKING...', tone: 'muted' });
   });
 });
 

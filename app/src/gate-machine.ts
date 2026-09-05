@@ -1,6 +1,4 @@
-import type {
-  ErrorCode, GatePosition, GateStatusResponse, TriggerResponse,
-} from '@gate/shared';
+import type { ErrorCode, GateStatusResponse, TriggerResponse } from '@gate/shared';
 
 /**
  * Everything the gate screen decides, with no React and no fetch in it, so it
@@ -106,77 +104,127 @@ export function nextState(
 }
 
 /**
- * What the top of the screen is allowed to say about the gate.
+ * What the top of the screen says about the controller.
  *
- * Position leads and controller reachability qualifies it, on one line. The
- * two are separate facts -- Shelly Cloud lags a device offline by up to a
- * minute, so "we could not ask" and "the controller is down" are different
- * things and only one of them is ours to assert -- but this is a gate opener
- * that happens to show status, not a dashboard, so they share a row.
+ * `unreadable` exists because a failed CHECK is not an offline CONTROLLER.
+ * Collapsing the two would have the app assert something about hardware it
+ * merely failed to ask about.
  *
- * `not_closed` is rendered "Not closed" and never "Open". A gate stopped
- * mid-travel, standing fully open, or jammed on one leaf all read identically
- * to the reed contact, so "Open" would be a claim about three different
- * situations, wrong in two of them.
+ * Position is NOT here. It moved to the banner, where it gets the size and
+ * colour that make it readable at a glance from a car -- which is the whole
+ * point of having a sensor. This line stays small and secondary.
  */
-export type GateStatusView = {
-  kind: 'checking' | 'closed' | 'not-closed' | 'unknown';
-  headline: string;
-  /** Clock time of the reading, when there is one to qualify. */
-  checkedAt?: string;
-  /** The second line: why we do not know, or what we last saw and when. */
-  note?: string;
-};
+export interface SeenAt {
+  at: string;
+  /**
+   * Whether the reading is still being stood behind. Drives the word in front
+   * of the time: "Checked" claims we know it now, "Last seen" admits we do
+   * not. The stamp is the same either way -- the backend reports when a
+   * reading was last CONFIRMED, not when we last tried -- so labelling it
+   * "Checked" while the controller is unreachable is a small, constant lie.
+   */
+  current: boolean;
+}
 
-const POSITION_HEADLINE: Record<GatePosition, string> = {
-  closed: 'Closed',
-  not_closed: 'Not closed',
-  unknown: 'Unknown',
-};
+export type ControllerView =
+  | { kind: 'checking' }
+  | { kind: 'online'; seen: SeenAt | null }
+  | { kind: 'offline'; seen: SeenAt | null }
+  /** The check did not complete. Says nothing about the controller. */
+  | { kind: 'unreadable'; reason: string };
 
-const VIEW_KIND: Record<GatePosition, GateStatusView['kind']> = {
-  closed: 'closed',
-  not_closed: 'not-closed',
-  unknown: 'unknown',
-};
-
-export function gateStatusView(
+export function controllerView(
   reading: GateStatusResponse | ApiFailure | null,
-  now: number,
-): GateStatusView {
-  if (reading === null) return { kind: 'checking', headline: 'Checking...' };
+): ControllerView {
+  if (reading === null) return { kind: 'checking' };
 
-  // A failed check tells us nothing about the gate, so the answer is Unknown
-  // -- never the last value we happened to have cached, which would be the
-  // screen quietly going stale without saying so.
   if ('ok' in reading && reading.ok === false) {
     return {
-      kind: 'unknown',
-      headline: 'Unknown',
-      note: reading.code === NETWORK_UNREACHABLE
+      kind: 'unreadable',
+      reason: reading.code === NETWORK_UNREACHABLE
         ? 'No connection to the gate service.'
-        : 'Could not check the gate just now.',
+        : 'Could not check the controller just now.',
     };
   }
 
   const status = reading as GateStatusResponse;
-  const view: GateStatusView = {
-    kind: VIEW_KIND[status.position],
-    headline: POSITION_HEADLINE[status.position],
-    checkedAt: status.checkedAt,
-  };
 
-  // Stale, but not blank: the reading we last had is still worth showing as
-  // long as it carries its age. Suppressed when the controller is down --
-  // that is the more useful fact, and two explanations on one line is noise.
-  if (status.position === 'unknown' && status.lastReading !== null && status.reachable) {
-    const seen = POSITION_HEADLINE[status.lastReading.position].toLowerCase();
-    view.note = `Last seen ${seen} ${formatAge(status.lastReading.at, now)}.`;
-  }
+  // No reading ever taken means no time to show. `checkedAt` falls back to
+  // "now" in that case, and printing it would date a reading that never
+  // happened.
+  const seen: SeenAt | null = status.lastReading === null
+    ? null
+    // A confirmed position is the backend's own statement that the reading is
+    // fresh AND the controller answered, so it is the whole test.
+    : { at: status.checkedAt, current: status.position !== 'unknown' };
 
-  if (!status.reachable) view.note = 'Controller offline.';
+  return status.reachable ? { kind: 'online', seen } : { kind: 'offline', seen };
+}
 
-  return view;
+/**
+ * The gate's position, sized and worded for a glance from a moving car.
+ *
+ * `not_closed` renders as **OPEN**, and that is a deliberate, informed
+ * inaccuracy. The contact cannot tell a gate standing fully open from one
+ * stopped mid-travel or jammed on a leaf, so "OPEN" overstates what is known
+ * in two of those three cases. It is used anyway because the question being
+ * answered here is "do I need to turn the car around", and for that question
+ * OPEN and NOT CLOSED have the same answer -- while a driver reading two
+ * words at arm's length does not reliably parse the negation. The precise
+ * vocabulary survives everywhere it costs nothing: the wire format, the API,
+ * the audit trail, and this file's own types all still say `not_closed`.
+ *
+ * When the position can no longer be confirmed, the last reading is shown
+ * greyed under a **LAST SEEN** label rather than collapsing to a bare
+ * UNKNOWN. It is more useful and no less honest: the word is what we last
+ * saw, and the grey and the label both say we are no longer standing behind
+ * it. Two carriers, so the doubt survives being read in sunlight or by
+ * someone who cannot see the colour.
+ *
+ * WHY the position is unconfirmed is not repeated here, and neither is WHEN.
+ * `StatusPanel` above already carries both -- "Controller offline" and
+ * "Last seen 21:34" -- and saying either twice makes the screen slower to
+ * read, which is the one thing this element cannot afford.
+ */
+export interface PositionBanner {
+  text: string;
+  tone: 'ok' | 'warn' | 'muted';
+  /**
+   * Small qualifier set above the word, used when the word is no longer
+   * current. Kept as its own field rather than folded into `text` so the
+   * break is deterministic: "LAST SEEN CLOSED" as one hero-sized string wraps
+   * wherever the phone happens to be narrow, and could land as "LAST" /
+   * "SEEN CLOSED". The position itself must never be the half that wraps.
+   */
+  label?: string;
+}
+
+/** OPEN, not NOT CLOSED. See the note above -- this is the only place it bends. */
+const WORD: Record<'closed' | 'not_closed', string> = {
+  closed: 'CLOSED',
+  not_closed: 'OPEN',
+};
+
+export function positionBanner(
+  reading: GateStatusResponse | ApiFailure | null,
+): PositionBanner {
+  if (reading === null) return { text: 'CHECKING...', tone: 'muted' };
+
+  // A failed check carries no reading at all -- not even a stale one, since
+  // the response never arrived. StatusPanel explains why.
+  if ('ok' in reading && reading.ok === false) return { text: 'UNKNOWN', tone: 'muted' };
+
+  const status = reading as GateStatusResponse;
+  if (status.position === 'closed') return { text: 'CLOSED', tone: 'ok' };
+  if (status.position === 'not_closed') return { text: 'OPEN', tone: 'warn' };
+
+  // Unconfirmed. Show what we last saw, marked as no longer current.
+  const last = status.lastReading;
+  if (last === null || last.position === 'unknown') return { text: 'UNKNOWN', tone: 'muted' };
+
+  // No age here: the header's "Last seen 21:34" already carries it, and the
+  // word itself is the whole point of this element.
+  return { label: 'LAST SEEN', text: WORD[last.position], tone: 'muted' };
 }
 
 /**
@@ -195,30 +243,6 @@ export function gateStatusView(
 export const isAwaitingReading = (
   reading: GateStatusResponse | ApiFailure | null,
 ): boolean => reading !== null && 'position' in reading && reading.position === 'unknown';
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-/**
- * Rough relative age: "12 minutes ago".
- *
- * Rough on purpose. This qualifies a reading we have already admitted is too
- * old to trust, so precision here would dress up a number that has no
- * precision to give. Hand-rolled rather than Intl.RelativeTimeFormat for the
- * same reason formatClock is: identical output on every device.
- */
-export function formatAge(iso: string, now: number): string {
-  const elapsed = Math.max(0, now - new Date(iso).getTime());
-  if (elapsed < MINUTE_MS) return 'just now';
-
-  const plural = (n: number, unit: string): string =>
-    `${n} ${unit}${n === 1 ? '' : 's'} ago`;
-
-  if (elapsed < HOUR_MS) return plural(Math.floor(elapsed / MINUTE_MS), 'minute');
-  if (elapsed < DAY_MS) return plural(Math.floor(elapsed / HOUR_MS), 'hour');
-  return plural(Math.floor(elapsed / DAY_MS), 'day');
-}
 
 /**
  * How long the app may sit in the background before the biometric lock

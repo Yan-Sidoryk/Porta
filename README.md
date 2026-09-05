@@ -348,24 +348,42 @@ One screen, forced dark, no system theme. One round button, low and centred so
 it falls under a thumb one-handed. It is deliberately not a consumer smart-home
 app: the reference is a key fob or an e-stop panel, because that is what it is.
 
-No gate iconography, and never the word "Open". The status line reads
-**Closed**, **Not closed**, or **Unknown** — the three things the reed contact
-can actually support — with controller reachability as the qualifier beside
-it. A glyph implying a position would be wrong roughly half the time.
+No gate iconography. The gate's position is the largest thing on the screen —
+**CLOSED** in green, **OPEN** in amber — because the real usage is a glance
+from a car that is already moving. Controller reachability sits above it in
+small type, since it answers a different and rarer question.
+
+When the position can no longer be confirmed, the last reading is greyed under
+a small **LAST SEEN** label rather than collapsing to a bare UNKNOWN. More
+useful and no less honest: the word is what was last seen, and the grey and
+the label both say the app is no longer standing behind it. When and why it is
+unconfirmed live in the line above — "Controller offline", "Last seen 15:02" —
+and are not repeated.
+
+**"OPEN" is a deliberate simplification.** The sensor reports a magnet or no
+magnet, so a gate standing fully open, one stopped mid-travel, and one jammed
+on a leaf are the same reading — `not_closed`. That word is what the API, the
+domain and the audit trail use. The screen says OPEN because the question a
+driver is actually asking is "do I need to turn around", both cases answer it
+the same way, and a negation is slow to read at arm's length. The imprecision
+is confined to one rendering function.
 
 State is never carried by colour alone, and the reading is a lagging one: the
 physical remote works whether the app is running or not, a missed webhook is
 only corrected on the next poll, and Shelly marks a device offline only once
-its keepalive expires. So a stale reading shows its age — "Unknown, last seen
-closed 12 minutes ago" — rather than either going quiet or standing there
-looking current. A check that fails reads Unknown too: not reaching the gate
-service says nothing about the gate.
+its keepalive expires. So a stale reading shows its age — "Last seen closed 12
+minutes ago" — rather than going quiet or standing there looking current. A
+check that fails reads UNKNOWN too: not reaching the gate service says nothing
+about the gate.
 
 While the gate is moving the status resolves itself. A tap necessarily leaves
 the position unknown, so the screen keeps asking every few seconds until a real
-reading lands — you can tap, drive off, and watch it flip to **Closed** without
+reading lands — you can tap, drive off, and watch it flip to CLOSED without
 pulling to refresh. That polling is against the backend's own memory, not
 Shelly, and it gives up after about ninety seconds.
+
+A result message from a tap borrows the same strip for six seconds and then
+hands it back to the position.
 
 After a tap the button disables itself for the cooldown, with the wait counting
 down on the button itself. The duration always comes from the server's

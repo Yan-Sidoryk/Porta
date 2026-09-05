@@ -5,8 +5,9 @@ import * as Haptics from 'expo-haptics';
 import type { AuditEvent, GateStatusResponse } from '@gate/shared';
 import { getAudit, getStatus, logout, trigger, type ApiFailure } from '../api';
 import {
-  canTap, cooldownProgress, gateStatusView, isAwaitingReading, nextState,
-  secondsLeft, tapIsFinished, type GateUiState,
+  canTap, controllerView, cooldownProgress, isAwaitingReading, nextState,
+  positionBanner, secondsLeft, tapIsFinished,
+  type GateUiState, type PositionBanner,
 } from '../gate-machine';
 import { Ionicons } from '@expo/vector-icons';
 import { GateButton } from '../components/GateButton';
@@ -26,8 +27,12 @@ interface Props {
 /** Fast enough for a countdown to look live, slow enough to be free. */
 const TICK_MS = 250;
 
-/** How long a result message stays before clearing itself. Tune to taste. */
-const BANNER_VISIBLE_MS = 10_000;
+/**
+ * How long a result message covers the position before handing the strip
+ * back. Short: the position underneath is the thing being looked for, and a
+ * message about a tap the user just made is stale almost immediately.
+ */
+const BANNER_VISIBLE_MS = 6000;
 
 /**
  * How often to re-ask while the gate is mid-answer.
@@ -55,12 +60,46 @@ const WATCH_ATTEMPTS = 30;
  * A minimum rather than a fixed height, so large accessibility text grows
  * instead of being clipped.
  */
-const BANNER_MIN_HEIGHT = 80;
+/**
+ * Sized for the tallest thing the strip ever holds, which is a three-line
+ * message: 3 x 20 line height + 32 padding. The longest strings in MESSAGES
+ * run to three lines on a narrow phone, so reserving for two would put the
+ * hop back for exactly the errors most worth reading.
+ */
+const BANNER_MIN_HEIGHT = 92;
+
+/** Explicit, so the reserved height above is arithmetic and not a guess. */
+const MESSAGE_LINE_HEIGHT = 20;
+
+/**
+ * The position's own type, sized so the strip is the SAME height whether it
+ * holds a position or a result message. `typography.hero` overflowed the
+ * reserved space once a "LAST SEEN" label sat above it, and the strip growing
+ * as a message came and went made the button hop.
+ *
+ * Line heights are explicit rather than left to the platform's ~1.2x guess,
+ * because the whole point is that the arithmetic lands predictably:
+ * 14 label + 2 gap + 32 word + 32 padding = 80, inside the reserved height.
+ */
+const POSITION_TYPE = { fontSize: 28, fontWeight: '800' as const, lineHeight: 32 };
+const POSITION_LABEL_TYPE = { fontSize: 12, fontWeight: '600' as const, lineHeight: 14 };
+const POSITION_LABEL_GAP = 2;
 
 interface BannerMessage {
   text: string;
   tone: string;
+  /** Small qualifier above the headline, e.g. "LAST SEEN". */
+  label?: string;
+  /** Big and bold -- used for the position, which is read at a glance. */
+  emphasis?: boolean;
 }
+
+/** The position's semantic tone, resolved against the theme. */
+const POSITION_TONE: Record<PositionBanner['tone'], string> = {
+  ok: colors.ok,
+  warn: colors.warn,
+  muted: colors.textDim,
+};
 
 export function GateScreen({ onSignedOut }: Props) {
   const [state, setState] = useState<GateUiState>({ kind: 'idle' });
@@ -300,6 +339,14 @@ export function GateScreen({ onSignedOut }: Props) {
     void refreshStatus();
   };
 
+  const position = positionBanner(reading);
+  const positionMessage: BannerMessage = {
+    text: position.text,
+    tone: POSITION_TONE[position.tone],
+    emphasis: true,
+    ...(position.label === undefined ? {} : { label: position.label }),
+  };
+
   const tappable = canTap(state, now);
   const window = state.kind === 'success'
     ? { until: state.until, totalMs: state.totalMs }
@@ -380,15 +427,13 @@ export function GateScreen({ onSignedOut }: Props) {
           </Pressable>
         </View>
 
-        {/* ponytail: `now` only ticks during a cooldown, so a stale reading's
-            "12 minutes ago" freezes on an idle screen until the next
-            foreground, pull, or tap re-reads it. Waking the JS thread on an
-            idle screen to age a line nobody is looking at costs more than it
-            buys; give this its own slow interval if that stops being true. */}
-        <StatusPanel view={gateStatusView(reading, now)} use24h={use24h} />
+        <StatusPanel view={controllerView(reading)} use24h={use24h} />
       </View>
 
-      <Banner message={banner} />
+      {/* The strip is the position's home; a result message borrows it for a
+          few seconds and then hands it straight back. Falling back rather
+          than stacking keeps the button in the same place either way. */}
+      <Banner message={banner ?? positionMessage} />
 
       {/* Low and centred: within thumb reach one-handed, which is how this is
           actually used -- standing at a gate, often in the rain. */}
@@ -433,9 +478,35 @@ function Banner({ message }: { message: BannerMessage | null }) {
             backgroundColor: colors.surface,
             padding: space.md,
             borderRadius: 8,
+            gap: POSITION_LABEL_GAP,
+            // The box itself holds the reserved height, not just the space
+            // around it, so a one-line message and a labelled position are
+            // the same size and nothing moves as one replaces the other.
+            // Still a minimum: large accessibility text grows the strip
+            // rather than being clipped inside it.
+            minHeight: BANNER_MIN_HEIGHT,
+            justifyContent: 'center',
           }}
         >
-          <Text numberOfLines={3} style={{ ...typography.body, color: colors.text }}>
+          {message.label === undefined ? null : (
+            // Its own line, deliberately: the qualifier must never be the
+            // half that survives a glance. Small and dim so the word below
+            // still lands first, and present in the text so the doubt does
+            // not depend on seeing that the word is grey.
+            <Text style={{ ...POSITION_LABEL_TYPE, color: colors.textDim, letterSpacing: 1 }}>
+              {message.label}
+            </Text>
+          )}
+
+          {/* The position is coloured; a message stays plain text with its
+              tone on the border, so colour never has to be read to
+              understand a sentence. Either way the words carry the meaning. */}
+          <Text
+            numberOfLines={3}
+            style={message.emphasis
+              ? { ...POSITION_TYPE, color: message.tone, letterSpacing: 1 }
+              : { ...typography.body, lineHeight: MESSAGE_LINE_HEIGHT, color: colors.text }}
+          >
             {message.text}
           </Text>
         </View>

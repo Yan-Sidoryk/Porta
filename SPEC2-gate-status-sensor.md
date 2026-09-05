@@ -198,53 +198,81 @@ the other.
 
 ## App
 
-**Extend the status line that already exists.** `StatusPanel` sits above the
-button and shows controller reachability today; its doc comment argues position
-should never be shown, which was correct until this hardware existed. Position
-becomes the headline and reachability demotes to the qualifier on the same row,
-rather than adding a second row to a panel that must stay visibly secondary to
-the button.
+**Position goes in the banner; the header line goes back to reachability.**
 
-Four states, each with distinct text:
+A small line in the header is the wrong home for the one fact a driver needs
+to read at arm's length while pulling away. The message strip below the header
+is already the biggest, highest-contrast element on the screen, so position
+lives there and `StatusPanel` returns to controller online/offline only.
 
 ```
-● Closed                    Checked 21:34
-● Not closed                Checked 21:34
-● Unknown                   Checked 21:34
-  Last seen closed 12 minutes ago
-● Unknown
-  No connection to the gate service.
++--------------------------------------------------+
+| Porta                                        [.]  |
+| * Controller online              Checked 21:34    |
++--------------------------------------------------+
+| |                                                 |
+| |  CLOSED            <- green, hero type          |
+| |                                                 |
++--------------------------------------------------+
 ```
 
-- **Closed** — the only confident positive state
-- **Not closed** — never render this as "Open"
-- **Unknown** — no reading yet, or the gate is moving
-- **Unknown, last seen closed 12 minutes ago** — stale, with relative age
+Three states, coloured and worded:
 
-Requirements:
+- **CLOSED** — green. The only confident positive state.
+- **OPEN** — amber.
+- **LAST SEEN / CLOSED** — grey. The last reading, no longer confirmed.
+- **UNKNOWN** — grey, only when there is nothing to have last seen.
 
-- Never encode state in colour alone. Text carries the meaning; colour supports it.
+When the position can no longer be confirmed, show the last reading greyed
+under a small **LAST SEEN** label rather than collapsing to a bare UNKNOWN. It
+is more useful and no less honest: the word is what we last saw, and the grey
+and the label both say we are no longer standing behind it — two carriers, so
+the doubt survives sunlight and colour blindness.
+
+The label is its own line, not part of the string. "LAST SEEN CLOSED" at hero
+size wraps wherever the phone happens to be narrow and could land as "LAST" /
+"SEEN CLOSED"; the word that answers the question must never be the half that
+wraps.
+
+The header carries when — "Last seen 15:02" — so the banner does not.
+
+**Do not repeat WHY it is unconfirmed.** `StatusPanel` above already says
+"Controller offline" or "Status unavailable". Saying it twice makes the screen
+slower to read, which is the one thing this element cannot afford.
+
+**`not_closed` renders as OPEN, and that is a deliberate, informed
+inaccuracy.** It overstates what is known: the contact cannot tell a gate
+standing fully open from one stopped mid-travel or jammed on a leaf. It is
+used anyway because the question actually being asked at a glance is "do I
+need to turn the car around", and OPEN and NOT CLOSED have the same answer to
+that question -- while a driver reading two words at arm's length does not
+reliably parse a negation. This is a presentation choice at the last possible
+layer, made with the tradeoff understood, and it buys back the glanceability
+that a strictly accurate phrase was costing.
+
+The precise vocabulary survives everywhere it costs nothing to keep: the wire
+format, `GatePosition`, the port, the store, and the audit trail all still say
+`not_closed`. Only the rendered string differs, in exactly one function.
+
+A result message from a tap borrows the strip and hands it straight back --
+replacing rather than stacking, so the button never moves under a thumb.
+Messages clear after 6 seconds: the position underneath is what is being
+looked for, and a message about a tap the user just made goes stale fast.
+
+Requirements that still hold:
+
+- Colour never carries state alone. The words say it too.
 - No gate iconography implying a position.
-- The status must be visibly secondary to the button. This is a gate opener that
-  happens to show status, not a dashboard.
-- Refresh on app foreground and after a trigger completes. The screen currently
-  declines to re-read status after a tap because that call spent the Shelly
-  1 req/s slot; it now reads from memory, so that reasoning no longer holds and
-  the comment explaining it should go.
-- **While the position is `unknown`, keep asking until it resolves.** The
-  refresh fired straight after a tap can only ever read `unknown` -- the gate
-  has only just started moving -- so on those four triggers alone a user who
-  taps and then watches the screen sits on a frozen `Unknown` long after the
-  webhook told the backend the gate had finished closing. That is the single
-  moment this whole feature exists for: driving away and wanting to know the
-  gate shut behind you. Re-ask every ~3s, stop the moment a real reading lands,
-  and give up after ~90s -- a gate resolves within a swing, and even one
-  stopped mid-travel reads `not_closed`, so a position still unknown by then
-  means the sensor is broken rather than the gate being slow. This hits the
-  backend's own memory, not Shelly, so it costs nothing from the 1 req/s
-  budget. Do NOT auto-retry a backend that was unreachable: that is a
-  different failure, and a 3s timer aimed at it is a retry storm.
-- If the backend is unreachable, show `Unknown` — never the last cached value
+- Refresh on app foreground and after a trigger completes.
+- While the position is `unknown`, keep asking until it resolves. The refresh
+  fired straight after a tap can only ever read `unknown` -- the gate has only
+  just started moving -- so without this a user who taps and then watches the
+  screen sits on a frozen UNKNOWN long after the webhook told the backend the
+  gate had finished closing. Re-ask every ~3s, stop the moment a real reading
+  lands, give up after ~90s. This hits the backend's own memory, not Shelly.
+  Do NOT auto-retry a backend that was unreachable: different failure, and a
+  3s timer aimed at it is a retry storm.
+- If the backend is unreachable, show UNKNOWN -- never the last cached value
   without an age on it.
 
 ## Testing

@@ -27,8 +27,14 @@ let nextAllowedAt = 0;
 async function waitForSlot(): Promise<void> {
   // Wall clock, not ClockPort: this pairs with setTimeout, and a fake clock
   // would sit here forever.
-  const wait = nextAllowedAt - Date.now();
-  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  //
+  // A loop, not a single sleep: setTimeout is allowed to fire a millisecond
+  // or two early against Date.now(), and on Windows routinely does. One sleep
+  // therefore leaves the gap a hair under a second and lets the account trip
+  // Shelly's own limiter, which answers TOO_MANY_REQUESTS.
+  for (let wait = nextAllowedAt - Date.now(); wait > 0; wait = nextAllowedAt - Date.now()) {
+    await new Promise((resolve) => { setTimeout(resolve, wait); });
+  }
   nextAllowedAt = Date.now() + MIN_REQUEST_GAP_MS;
 }
 

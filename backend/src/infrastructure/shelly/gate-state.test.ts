@@ -135,6 +135,41 @@ describe('ReedSwitchStateAdapter staleness', () => {
     expect(state.reachable).toBe(true);
   });
 
+  it('will not claim a position once contact with the controller is lost', async () => {
+    // The bug this exists to prevent: a green, confident CLOSED sitting on
+    // screen while the controller is unreachable. The physical remote still
+    // works, so a gate walked open during the silence would leave the app
+    // asserting the opposite of the truth.
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+    adapter.setOnline(true);
+    adapter.record('closed', 'poll', clock.now());
+    expect((await adapter.getState()).position).toBe('closed');
+
+    adapter.setOnline(false);
+
+    const state = await adapter.getState();
+    expect(state.position).toBe('unknown');
+    // Demoted to a recollection, not hidden: the app still shows what it was
+    // and how long ago, which is the useful half of the answer.
+    expect(state.lastReading).toEqual({ position: 'closed', at: clock.now() });
+  });
+
+  it('treats a webhook as proof the device is alive', async () => {
+    // The device reaching us first-hand beats the cloud's keepalive flag,
+    // which lags by up to a minute. Without this, a poll failing while pushes
+    // still arrive would report unknown on data just delivered by the device.
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+    adapter.setOnline(false);
+
+    adapter.record('closed', 'webhook', clock.now());
+
+    const state = await adapter.getState();
+    expect(state.reachable).toBe(true);
+    expect(state.position).toBe('closed');
+  });
+
   it('does not let a reachable-but-silent controller keep a dead reading alive', async () => {
     // The add-on comes unseated: polls still succeed and still say online,
     // but no contact is ever read again. The reading must still age out.
@@ -183,13 +218,17 @@ describe('reconciliation poll', () => {
     await settle(async () => !(await adapter.getState()).reachable && count() > 0);
     stop();
 
-    // The failed poll recorded nothing, so the last reading stands until it
-    // ages out on its own -- and reachability drops immediately.
-    expect((await adapter.getState()).reachable).toBe(false);
-    expect((await adapter.getState()).position).toBe('closed');
+    // A failed poll must degrade honestly rather than throw out of the timer.
+    // Losing contact drops BOTH reachability and the claim to a position: we
+    // are no longer in a position to say, and the gate can still be worked by
+    // the physical remote while we are not looking.
+    const state = await adapter.getState();
+    expect(state.reachable).toBe(false);
+    expect(state.position).toBe('unknown');
 
-    clock.advance(STALE_AFTER_MS + 1);
-    expect((await adapter.getState()).position).toBe('unknown');
+    // The reading itself is kept, so the app can still say what it last saw
+    // and when -- demoted from a claim to a recollection, never discarded.
+    expect(state.lastReading).toEqual({ position: 'closed', at: clock.now() });
   });
 
   it('honours REED_LOGIC_INVERTED end to end', async () => {
@@ -206,6 +245,26 @@ describe('reconciliation poll', () => {
     stop();
 
     expect((await adapter.getState()).position).toBe('not_closed');
+  });
+
+  it('ignores the cloud cache served for an offline device', async () => {
+    // An offline device still comes back with an `input:<id>` block -- it is
+    // Shelly's cached last-known value, not a live read. Recording it would
+    // stamp a fresh confirmedAt on stale data every single tick, so a gate
+    // whose controller died hours ago would still report a position and the
+    // staleness window would never fire at all.
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(0, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+    stop();
+
+    expect(adapter.lastPosition()).toBeNull();
+    expect((await adapter.getState()).position).toBe('unknown');
   });
 
   it('records nothing when the add-on is missing, but still reports reachability', async () => {

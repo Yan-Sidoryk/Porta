@@ -53,6 +53,13 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
     this.reading = { position, at };
     this.source = source;
     this.confirmedAt = at;
+
+    // A webhook is the device reaching US, which is stronger proof it is
+    // alive than the cloud's keepalive flag -- that lags by up to a minute
+    // and can call a perfectly healthy device offline. Without this, a poll
+    // failing while pushes still arrive would report 'unknown' on data that
+    // had just been delivered first-hand.
+    if (source === 'webhook') this.online = true;
   }
 
   markUnknown(): void {
@@ -94,8 +101,17 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
     const fresh = this.confirmedAt !== null
       && now.getTime() - this.confirmedAt.getTime() <= this.staleAfterMs;
 
+    // `online` is part of the test, not just decoration beside it. Losing
+    // contact with the controller is POSITIVE evidence that we can no longer
+    // know the position -- the physical remote still works, and a gate walked
+    // open while we were disconnected would leave a confident, green, wrong
+    // CLOSED on the screen. Reporting a position we cannot currently confirm
+    // is the exact failure this sensor was added to remove.
+    //
+    // The last reading survives on `lastReading`, with its age, so nothing is
+    // hidden -- it is demoted from a claim to a recollection.
     return {
-      position: fresh && this.reading !== null ? this.reading.position : 'unknown',
+      position: fresh && this.online && this.reading !== null ? this.reading.position : 'unknown',
       reachable: this.online,
       checkedAt: this.confirmedAt ?? now,
       lastReading: this.reading,

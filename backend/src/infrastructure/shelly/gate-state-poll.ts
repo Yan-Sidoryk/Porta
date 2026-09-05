@@ -110,6 +110,14 @@ export function startGateStatePoll(
 
     adapter.setOnline(device.online);
 
+    // An offline device is served from Shelly Cloud's CACHE: the reply still
+    // carries an `input:<id>` block, but it is the last value the device
+    // managed to report, not a live read. Recording it would stamp a fresh
+    // `confirmedAt` on stale data every 60 seconds, so a gate whose
+    // controller had been dead for hours would still be reporting a
+    // confident position. Read nothing until the device is answering again.
+    if (!device.online) return;
+
     const seen = readContact(device.status, options.inputComponentId, options.reedLogicInverted);
     if (seen === null) return;
 

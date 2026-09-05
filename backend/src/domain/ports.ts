@@ -1,6 +1,6 @@
-import type { ErrorCode, PulseOutcome, Role } from '@gate/shared';
+import type { ErrorCode, GatePosition, PulseOutcome, Role } from '@gate/shared';
 import type { AccessGrant, PolicyDecision, User } from './user.js';
-import type { ClaimResult, GateState, PulseResult } from './gate.js';
+import type { ClaimResult, GateState, PulseResult, ReadingSource } from './gate.js';
 
 export interface GateCommandPort {
   pulse(): Promise<PulseResult>;
@@ -8,6 +8,22 @@ export interface GateCommandPort {
 
 export interface GateStatePort {
   getState(): Promise<GateState>;
+}
+
+/**
+ * The write side of gate position, with three callers: the webhook the Shelly
+ * fires on contact change, the reconciliation poll, and the trigger path.
+ *
+ * Split from GateStatePort because the readers and the writers are different
+ * code with different rights -- the webhook route may report state and must
+ * never be able to command the gate, and TriggerGateUseCase needs
+ * `markUnknown` without gaining the ability to read a position it must never
+ * predict from.
+ */
+export interface GateStateSinkPort {
+  record(position: GatePosition, source: ReadingSource, at: Date): void;
+  /** The gate is moving, so whatever we stored is now wrong. */
+  markUnknown(): void;
 }
 
 export interface AccessPolicyPort {

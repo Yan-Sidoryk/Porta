@@ -31,8 +31,11 @@ function findOnline(node: unknown, deviceId: string): boolean {
 /**
  * There is no position sensor on this gate, so `position` is hardcoded
  * `'unknown'` -- inferring it from command history would be a lie the app
- * would then show as fact. A future reed-switch adapter replaces this class
- * wholesale; the port does not change.
+ * would then show as fact.
+ *
+ * SUPERSEDED by ReedSwitchStateAdapter, and kept unused as the documented
+ * fallback for a deployment with no reed contact fitted. Swapping it back in
+ * is one line in the composition root.
  */
 export class UnknownPositionStateAdapter implements GateStatePort {
   constructor(
@@ -52,6 +55,9 @@ export class UnknownPositionStateAdapter implements GateStatePort {
         && reply.status === 200
         && findOnline(reply.body, this.config.deviceId),
       checkedAt: this.clock.now(),
+      // No sensor in this configuration, so there is no reading to have last
+      // seen -- not even a stale one.
+      lastReading: null,
     };
   }
 }

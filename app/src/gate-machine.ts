@@ -1,4 +1,6 @@
-import type { ErrorCode, GateStatusResponse, TriggerResponse } from '@gate/shared';
+import type {
+  ErrorCode, GatePosition, GateStatusResponse, TriggerResponse,
+} from '@gate/shared';
 
 /**
  * Everything the gate screen decides, with no React and no fetch in it, so it
@@ -104,38 +106,118 @@ export function nextState(
 }
 
 /**
- * What the top of the screen is allowed to say about the controller.
+ * What the top of the screen is allowed to say about the gate.
  *
- * `unreadable` exists because a failed CHECK is not an offline CONTROLLER.
- * Collapsing the two would have the app assert something about hardware it
- * merely failed to ask about -- the same class of lie as displaying "Closed"
- * for a gate whose position is unknown.
+ * Position leads and controller reachability qualifies it, on one line. The
+ * two are separate facts -- Shelly Cloud lags a device offline by up to a
+ * minute, so "we could not ask" and "the controller is down" are different
+ * things and only one of them is ours to assert -- but this is a gate opener
+ * that happens to show status, not a dashboard, so they share a row.
+ *
+ * `not_closed` is rendered "Not closed" and never "Open". A gate stopped
+ * mid-travel, standing fully open, or jammed on one leaf all read identically
+ * to the reed contact, so "Open" would be a claim about three different
+ * situations, wrong in two of them.
  */
-export type ControllerView =
-  | { kind: 'checking' }
-  | { kind: 'online'; checkedAt: string }
-  | { kind: 'offline'; checkedAt: string }
-  /** The check did not complete. Says nothing about the controller. */
-  | { kind: 'unreadable'; reason: string };
+export type GateStatusView = {
+  kind: 'checking' | 'closed' | 'not-closed' | 'unknown';
+  headline: string;
+  /** Clock time of the reading, when there is one to qualify. */
+  checkedAt?: string;
+  /** The second line: why we do not know, or what we last saw and when. */
+  note?: string;
+};
 
-export function controllerView(
+const POSITION_HEADLINE: Record<GatePosition, string> = {
+  closed: 'Closed',
+  not_closed: 'Not closed',
+  unknown: 'Unknown',
+};
+
+const VIEW_KIND: Record<GatePosition, GateStatusView['kind']> = {
+  closed: 'closed',
+  not_closed: 'not-closed',
+  unknown: 'unknown',
+};
+
+export function gateStatusView(
   reading: GateStatusResponse | ApiFailure | null,
-): ControllerView {
-  if (reading === null) return { kind: 'checking' };
+  now: number,
+): GateStatusView {
+  if (reading === null) return { kind: 'checking', headline: 'Checking...' };
 
+  // A failed check tells us nothing about the gate, so the answer is Unknown
+  // -- never the last value we happened to have cached, which would be the
+  // screen quietly going stale without saying so.
   if ('ok' in reading && reading.ok === false) {
     return {
-      kind: 'unreadable',
-      reason: reading.code === NETWORK_UNREACHABLE
+      kind: 'unknown',
+      headline: 'Unknown',
+      note: reading.code === NETWORK_UNREACHABLE
         ? 'No connection to the gate service.'
-        : 'Could not check the controller just now.',
+        : 'Could not check the gate just now.',
     };
   }
 
   const status = reading as GateStatusResponse;
-  return status.reachable
-    ? { kind: 'online', checkedAt: status.checkedAt }
-    : { kind: 'offline', checkedAt: status.checkedAt };
+  const view: GateStatusView = {
+    kind: VIEW_KIND[status.position],
+    headline: POSITION_HEADLINE[status.position],
+    checkedAt: status.checkedAt,
+  };
+
+  // Stale, but not blank: the reading we last had is still worth showing as
+  // long as it carries its age. Suppressed when the controller is down --
+  // that is the more useful fact, and two explanations on one line is noise.
+  if (status.position === 'unknown' && status.lastReading !== null && status.reachable) {
+    const seen = POSITION_HEADLINE[status.lastReading.position].toLowerCase();
+    view.note = `Last seen ${seen} ${formatAge(status.lastReading.at, now)}.`;
+  }
+
+  if (!status.reachable) view.note = 'Controller offline.';
+
+  return view;
+}
+
+/**
+ * Whether the app should keep asking, because the gate is mid-answer.
+ *
+ * The webhook lands on the backend within a second of the gate finishing its
+ * swing, but the screen only re-reads on mount, foreground, pull, and tap --
+ * so a user who taps and then watches would sit on a frozen 'unknown' while
+ * the answer was already sitting on the server. This is what closes that gap.
+ *
+ * Deliberately false for an ApiFailure. A backend we could not reach is a
+ * different problem from a gate that is still moving, and retrying it on a
+ * three-second timer would be a retry storm aimed at something already known
+ * to be down. Foreground and pull-to-refresh still cover that case.
+ */
+export const isAwaitingReading = (
+  reading: GateStatusResponse | ApiFailure | null,
+): boolean => reading !== null && 'position' in reading && reading.position === 'unknown';
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Rough relative age: "12 minutes ago".
+ *
+ * Rough on purpose. This qualifies a reading we have already admitted is too
+ * old to trust, so precision here would dress up a number that has no
+ * precision to give. Hand-rolled rather than Intl.RelativeTimeFormat for the
+ * same reason formatClock is: identical output on every device.
+ */
+export function formatAge(iso: string, now: number): string {
+  const elapsed = Math.max(0, now - new Date(iso).getTime());
+  if (elapsed < MINUTE_MS) return 'just now';
+
+  const plural = (n: number, unit: string): string =>
+    `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+
+  if (elapsed < HOUR_MS) return plural(Math.floor(elapsed / MINUTE_MS), 'minute');
+  if (elapsed < DAY_MS) return plural(Math.floor(elapsed / HOUR_MS), 'hour');
+  return plural(Math.floor(elapsed / DAY_MS), 'day');
 }
 
 /**

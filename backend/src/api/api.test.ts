@@ -16,8 +16,11 @@ import {
 } from '../../test/fakes.js';
 import type { User } from '../domain/user.js';
 import { AUTH_RATE_LIMIT } from './routes/auth.js';
+import { ReedSwitchStateAdapter } from '../infrastructure/shelly/reed-switch-state-adapter.js';
 
 const COOLDOWN = 5000;
+const WEBHOOK_TOKEN = 'a'.repeat(43);
+const STALE_AFTER_MS = 300_000;
 const KEY = '3f6d1c8e-9b2a-4c5d-8e1f-0a2b3c4d5e6f';
 const KEY2 = '11111111-2222-3333-4444-555555555555';
 
@@ -54,7 +57,8 @@ const setup = (): void => {
   container = {
     trigger: new AuditedTriggerGate(
       new TriggerGateUseCase(
-        users, grants, new RoleBasedAccessPolicy(), new FakeGuard(clock), gate, clock, COOLDOWN,
+        users, grants, new RoleBasedAccessPolicy(), new FakeGuard(clock),
+        gate, clock, COOLDOWN, gateState,
       ),
       audit, clock, redact,
     ),
@@ -66,6 +70,10 @@ const setup = (): void => {
     revokeGrant: new RevokeAccessGrantUseCase(users, grants, clock),
     tokens,
     limiter: new InMemoryRateLimiter(clock),
+    clock,
+    gateStateSink: gateState,
+    gateStateWebhookToken: WEBHOOK_TOKEN,
+    gateStateAdapter: new ReedSwitchStateAdapter(clock, STALE_AFTER_MS),
     close: () => {},
   };
   app = buildApp(container);
@@ -193,13 +201,62 @@ describe('POST /gate/trigger', () => {
   });
 });
 
+describe('GET /webhooks/gate-state', () => {
+  const hook = (token: string, reading: string) =>
+    app.inject({ method: 'GET', url: `/webhooks/gate-state/${token}/${reading}` });
+
+  it('records both readings without any authentication', async () => {
+    // No bearer token: the Shelly has no session and never will. Its own
+    // secret is the whole of its authority, and that authority is "report a
+    // position" and nothing else.
+    expect((await hook(WEBHOOK_TOKEN, 'closed')).statusCode).toBe(200);
+    expect(gateState.recorded.at(-1)).toMatchObject({ position: 'closed', source: 'webhook' });
+
+    expect((await hook(WEBHOOK_TOKEN, 'not-closed')).statusCode).toBe(200);
+    expect(gateState.recorded.at(-1)).toMatchObject({ position: 'not_closed', source: 'webhook' });
+  });
+
+  it('records nothing for a wrong token', async () => {
+    const res = await hook('w'.repeat(43), 'closed');
+    expect(res.statusCode).not.toBe(200);
+    expect(gateState.recorded).toHaveLength(0);
+  });
+
+  it('answers a bad token exactly as it answers an unknown path', async () => {
+    // A distinguishable rejection -- a lone 404 among this API's 400s, or a
+    // different body -- would confirm the endpoint exists and hand an
+    // attacker a token oracle to grind against.
+    const rejected = await hook('w'.repeat(43), 'closed');
+    const unknownPath = await app.inject({ method: 'GET', url: '/nothing-here' });
+
+    expect(rejected.statusCode).toBe(unknownPath.statusCode);
+    expect(rejected.json()).toEqual(unknownPath.json());
+  });
+
+  it('rejects a reading it does not recognise', async () => {
+    const res = await hook(WEBHOOK_TOKEN, 'open');
+    expect(res.statusCode).not.toBe(200);
+    expect(gateState.recorded).toHaveLength(0);
+  });
+
+  it('cannot trigger the gate', async () => {
+    await hook(WEBHOOK_TOKEN, 'closed');
+    await hook(WEBHOOK_TOKEN, 'not-closed');
+    expect(gate.calls).toBe(0);
+  });
+});
+
 describe('GET /gate/status', () => {
   it('reports an unknown position with an ISO timestamp', async () => {
-    gateState.setResult({ position: 'unknown', reachable: true, checkedAt: new Date('2026-08-19T12:00:00Z') });
+    gateState.setResult({
+      position: 'unknown', reachable: true,
+      checkedAt: new Date('2026-08-19T12:00:00Z'), lastReading: null,
+    });
     const res = await app.inject({ method: 'GET', url: '/gate/status', headers: auth(owner) });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      position: 'unknown', reachable: true, checkedAt: '2026-08-19T12:00:00.000Z',
+      position: 'unknown', reachable: true,
+      checkedAt: '2026-08-19T12:00:00.000Z', lastReading: null,
     });
   });
 

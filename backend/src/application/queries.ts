@@ -16,7 +16,7 @@ export class GetGateStatusUseCase {
     } catch {
       // "Unreachable" is the honest answer to a failed reachability check, and
       // it is one the app can actually display. A 500 is not.
-      return { position: 'unknown', reachable: false, checkedAt: this.clock.now() };
+      return { position: 'unknown', reachable: false, checkedAt: this.clock.now(), lastReading: null };
     }
   }
 }

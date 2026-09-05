@@ -1,6 +1,6 @@
 import type { Config } from './config.js';
 import type {
-  GateCommandPort, GateStatePort, RateLimiterPort, TokenServicePort,
+  ClockPort, GateCommandPort, GateStateSinkPort, RateLimiterPort, TokenServicePort,
 } from './domain/ports.js';
 import { RoleBasedAccessPolicy } from './domain/access-policy.js';
 import { AuditedTriggerGate } from './application/audited-trigger.js';
@@ -14,7 +14,7 @@ import { SqliteAccessGrantRepository } from './infrastructure/db/grant-repositor
 import { SqliteAuditLog } from './infrastructure/db/audit-log.js';
 import { SqliteCommandGuard } from './infrastructure/db/command-guard.js';
 import { ShellyCloudGateCommandAdapter } from './infrastructure/shelly/gate-command-adapter.js';
-import { UnknownPositionStateAdapter } from './infrastructure/shelly/state-adapter.js';
+import { ReedSwitchStateAdapter } from './infrastructure/shelly/reed-switch-state-adapter.js';
 import { SystemClock } from './infrastructure/clock.js';
 import { JwtTokenService } from './infrastructure/jwt.js';
 import { InMemoryRateLimiter } from './infrastructure/rate-limiter.js';
@@ -37,6 +37,20 @@ export interface Container {
   /** Exposed for POST /auth/logout, which is a port call and not a use case. */
   tokens: TokenServicePort;
   limiter: RateLimiterPort;
+  clock: ClockPort;
+  /**
+   * The write side of gate position. Exposed for the webhook route, which may
+   * report state and must never be able to command the gate -- the narrow
+   * type is the thing that makes that structural rather than a promise.
+   */
+  gateStateSink: GateStateSinkPort;
+  gateStateWebhookToken: string;
+  /**
+   * The concrete adapter, for server.ts to hand to the reconciliation poll.
+   * The poll is started there rather than here so that building a container
+   * in a test does not open a socket to Shelly.
+   */
+  gateStateAdapter: ReedSwitchStateAdapter;
   close(): void;
 }
 
@@ -52,7 +66,9 @@ export function buildContainer(config: Config): Container {
   // The one line to change for local network control. Swap this for a
   // LocalRpcGateCommandAdapter or MqttGateCommandAdapter -- nothing else moves.
   const gateCommand: GateCommandPort = new ShellyCloudGateCommandAdapter(config.shelly);
-  const gateState: GateStatePort = new UnknownPositionStateAdapter(config.shelly, clock);
+  // The reed contact replaces UnknownPositionStateAdapter, which stays in the
+  // tree unused as the documented fallback for a deployment with no sensor.
+  const gateState = new ReedSwitchStateAdapter(clock, config.gateState.staleAfterMs);
 
   const users = new SqliteUserRepository(db);
   const grants = new SqliteAccessGrantRepository(db);
@@ -65,7 +81,7 @@ export function buildContainer(config: Config): Container {
     trigger: new AuditedTriggerGate(
       new TriggerGateUseCase(
         users, grants, new RoleBasedAccessPolicy(), new SqliteCommandGuard(db, clock),
-        gateCommand, clock, config.gateCooldownMs,
+        gateCommand, clock, config.gateCooldownMs, gateState,
       ),
       audit, clock,
       // The REAL redactor, not `(s) => s`. An audit row holds the raw adapter
@@ -84,6 +100,10 @@ export function buildContainer(config: Config): Container {
     revokeGrant: new RevokeAccessGrantUseCase(users, grants, clock),
     tokens,
     limiter: new InMemoryRateLimiter(clock),
+    clock,
+    gateStateSink: gateState,
+    gateStateWebhookToken: config.gateState.webhookToken,
+    gateStateAdapter: gateState,
     close: () => db.close(),
   };
 }

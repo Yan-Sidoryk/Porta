@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { GateStatusResponse } from '@gate/shared';
 import {
-  canTap, controllerView, cooldownProgress, formatClock, formatStamp, messageFor,
-  nextState, secondsLeft, shouldRelock, tapIsFinished, type GateUiState,
+  canTap, cooldownProgress, formatAge, formatClock, formatStamp, gateStatusView,
+  isAwaitingReading, messageFor, nextState, secondsLeft, shouldRelock, tapIsFinished,
+  type GateUiState,
 } from './gate-machine';
 
 const NOW = 1_700_000_000_000;
@@ -106,37 +108,105 @@ describe('shouldRelock', () => {
   });
 });
 
-describe('controllerView', () => {
+describe('gateStatusView', () => {
   const CHECKED = '2026-08-21T10:00:00.000Z';
-
-  it('reports online and offline from a real reading', () => {
-    expect(controllerView({ position: 'unknown', reachable: true, checkedAt: CHECKED }))
-      .toEqual({ kind: 'online', checkedAt: CHECKED });
-    expect(controllerView({ position: 'unknown', reachable: false, checkedAt: CHECKED }))
-      .toEqual({ kind: 'offline', checkedAt: CHECKED });
+  const NOW_MS = new Date(CHECKED).getTime();
+  const reading = (over: Partial<GateStatusResponse>): GateStatusResponse => ({
+    position: 'unknown', reachable: true, checkedAt: CHECKED, lastReading: null, ...over,
   });
 
-  // The bug this exists to prevent: a failed CHECK is not an offline
-  // CONTROLLER, and saying so is a claim about hardware we never reached.
-  it('never reports offline when the check itself failed', () => {
-    const rateLimited = controllerView({ ok: false, code: 'RATE_LIMITED', message: 'x' });
-    expect(rateLimited.kind).toBe('unreadable');
+  it('reports a measured position, and never calls not_closed "Open"', () => {
+    expect(gateStatusView(reading({ position: 'closed' }), NOW_MS))
+      .toMatchObject({ kind: 'closed', headline: 'Closed', checkedAt: CHECKED });
 
-    const noNetwork = controllerView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' });
-    expect(noNetwork.kind).toBe('unreadable');
+    // The whole point of the union. A gate stopped mid-travel, standing open,
+    // and jammed on one leaf are the same reading -- "Open" would be a claim
+    // about three situations and wrong in two.
+    const notClosed = gateStatusView(reading({ position: 'not_closed' }), NOW_MS);
+    expect(notClosed).toMatchObject({ kind: 'not-closed', headline: 'Not closed' });
+    expect(JSON.stringify(notClosed)).not.toMatch(/open/i);
   });
 
-  it('distinguishes a missing connection from a failed check', () => {
-    const noNetwork = controllerView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' });
-    const other = controllerView({ ok: false, code: 'INTERNAL', message: 'x' });
-    if (noNetwork.kind !== 'unreadable' || other.kind !== 'unreadable') {
-      throw new Error('expected both to be unreadable');
-    }
-    expect(noNetwork.reason).not.toBe(other.reason);
+  it('adds the age of the last reading once the current one goes stale', () => {
+    const view = gateStatusView(
+      reading({ position: 'unknown', lastReading: { position: 'closed', at: CHECKED } }),
+      NOW_MS + 12 * 60_000,
+    );
+    expect(view.headline).toBe('Unknown');
+    expect(view.note).toBe('Last seen closed 12 minutes ago.');
   });
 
-  it('is checking, not offline, before the first reading lands', () => {
-    expect(controllerView(null)).toEqual({ kind: 'checking' });
+  it('says the controller is offline rather than guessing at the gate', () => {
+    const view = gateStatusView(
+      reading({ reachable: false, lastReading: { position: 'closed', at: CHECKED } }),
+      NOW_MS,
+    );
+    expect(view.headline).toBe('Unknown');
+    expect(view.note).toBe('Controller offline.');
+  });
+
+  // The bug this exists to prevent: showing the last cached position, with no
+  // age on it, when the app could not reach the backend at all.
+  it('reports unknown when the check itself failed, never a cached value', () => {
+    const noNetwork = gateStatusView({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' }, NOW_MS);
+    const other = gateStatusView({ ok: false, code: 'INTERNAL', message: 'x' }, NOW_MS);
+
+    expect(noNetwork).toMatchObject({ kind: 'unknown', headline: 'Unknown' });
+    expect(other.kind).toBe('unknown');
+    expect(noNetwork.checkedAt).toBeUndefined();
+    expect(noNetwork.note).not.toBe(other.note);
+  });
+
+  it('is checking, not unknown, before the first reading lands', () => {
+    expect(gateStatusView(null, NOW_MS)).toEqual({ kind: 'checking', headline: 'Checking...' });
+  });
+});
+
+describe('isAwaitingReading', () => {
+  const reading = (over: Partial<GateStatusResponse>): GateStatusResponse => ({
+    position: 'unknown', reachable: true,
+    checkedAt: '2026-08-21T10:00:00.000Z', lastReading: null, ...over,
+  });
+
+  it('keeps asking while the gate is mid-answer, and stops once it lands', () => {
+    // The tap-then-watch case: the refresh fired straight after a pulse can
+    // only say unknown, and without this the screen would sit on it.
+    expect(isAwaitingReading(reading({ position: 'unknown' }))).toBe(true);
+
+    expect(isAwaitingReading(reading({ position: 'closed' }))).toBe(false);
+    expect(isAwaitingReading(reading({ position: 'not_closed' }))).toBe(false);
+  });
+
+  it('does not retry a backend it could not reach', () => {
+    // A different problem from a moving gate, and a three-second timer aimed
+    // at something already known to be down is a retry storm. Foreground and
+    // pull-to-refresh still cover it.
+    expect(isAwaitingReading({ ok: false, code: 'NETWORK_UNREACHABLE', message: 'x' })).toBe(false);
+    expect(isAwaitingReading({ ok: false, code: 'INTERNAL', message: 'x' })).toBe(false);
+  });
+
+  it('does not start before the first reading has landed', () => {
+    // Mount already fetches; a second request racing it buys nothing.
+    expect(isAwaitingReading(null)).toBe(false);
+  });
+});
+
+describe('formatAge', () => {
+  const AT = '2026-08-21T10:00:00.000Z';
+  const age = (ms: number): string => formatAge(AT, new Date(AT).getTime() + ms);
+
+  it('rounds down to the largest whole unit', () => {
+    expect(age(0)).toBe('just now');
+    expect(age(59_000)).toBe('just now');
+    expect(age(60_000)).toBe('1 minute ago');
+    expect(age(12 * 60_000)).toBe('12 minutes ago');
+    expect(age(59 * 60_000 + 59_000)).toBe('59 minutes ago');
+    expect(age(60 * 60_000)).toBe('1 hour ago');
+    expect(age(25 * 60 * 60_000)).toBe('1 day ago');
+  });
+
+  it('never reports a negative age from a clock that ran backwards', () => {
+    expect(age(-5_000)).toBe('just now');
   });
 });
 

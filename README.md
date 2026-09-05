@@ -35,11 +35,14 @@ the system exists to prevent. It is why there is a cooldown, why the same tap
 retried never sends a second pulse, and why a timed-out request is *never*
 retried automatically.
 
-**3. There is no position sensor.** The system genuinely does not know whether
-the gate is open or closed, and says so. It reports `position: "unknown"` and
-the device's online/offline state. Never infer position from command history —
-a gate app that confidently says "Closed" when it doesn't know is worse than
-one that admits ignorance.
+**3. The sensor knows closed, and nothing else.** A reed contact on the pillar
+reports `closed` or `not_closed` — never `open`. A gate stopped mid-travel, a
+gate standing fully open, and a gate jammed on one leaf are the same reading,
+so calling any of them "open" would be a claim about three situations and
+wrong in two. `unknown` is reserved for genuinely having no reading: nothing
+seen yet, the gate moving after a pulse, or a reading too stale to trust.
+Position is never inferred from command history — a gate app that confidently
+says "Closed" when it doesn't know is worse than one that admits ignorance.
 
 The physical remote keeps working and anyone can use it at any time, so cached
 state is never authoritative.
@@ -345,12 +348,24 @@ One screen, forced dark, no system theme. One round button, low and centred so
 it falls under a thumb one-handed. It is deliberately not a consumer smart-home
 app: the reference is a key fob or an e-stop panel, because that is what it is.
 
-No gate iconography and no position display. There is no sensor, so any glyph
-or label implying open or closed would be wrong roughly half the time. What is
-shown instead is whether the **controller** is reachable — and even that is a
-lagging indicator, since Shelly only marks a device offline once its keepalive
-expires, up to about a minute. A check that fails reads "Status unavailable",
-never "offline": not reaching the gate service says nothing about the hardware.
+No gate iconography, and never the word "Open". The status line reads
+**Closed**, **Not closed**, or **Unknown** — the three things the reed contact
+can actually support — with controller reachability as the qualifier beside
+it. A glyph implying a position would be wrong roughly half the time.
+
+State is never carried by colour alone, and the reading is a lagging one: the
+physical remote works whether the app is running or not, a missed webhook is
+only corrected on the next poll, and Shelly marks a device offline only once
+its keepalive expires. So a stale reading shows its age — "Unknown, last seen
+closed 12 minutes ago" — rather than either going quiet or standing there
+looking current. A check that fails reads Unknown too: not reaching the gate
+service says nothing about the gate.
+
+While the gate is moving the status resolves itself. A tap necessarily leaves
+the position unknown, so the screen keeps asking every few seconds until a real
+reading lands — you can tap, drive off, and watch it flip to **Closed** without
+pulling to refresh. That polling is against the backend's own memory, not
+Shelly, and it gives up after about ninety seconds.
 
 After a tap the button disables itself for the cooldown, with the wait counting
 down on the button itself. The duration always comes from the server's
@@ -428,7 +443,8 @@ All routes except login and refresh need `Authorization: Bearer <accessToken>`.
 | `POST` | `/auth/refresh` | `{refreshToken}` | `{accessToken, refreshToken}` |
 | `POST` | `/auth/logout` | — | `204` |
 | `POST` | `/gate/trigger` | `{idempotencyKey}` (uuid) | `{ok, outcome, replayed}` |
-| `GET` | `/gate/status` | — | `{position, reachable, checkedAt}` |
+| `GET` | `/gate/status` | — | `{position, reachable, checkedAt, lastReading}` |
+| `GET` | `/webhooks/gate-state/:token/:reading` | — | `{ok}` — the Shelly's push, no session |
 | `GET` | `/audit?limit=n` | — | recent events, newest last |
 | `POST` | `/access-grants` | `{userId, startsAt, endsAt}` | `{grantId}` |
 | `DELETE` | `/access-grants/:id` | — | `204` |
@@ -436,6 +452,42 @@ All routes except login and refresh need `Authorization: Bearer <accessToken>`.
 Access tokens last 15 minutes. Refresh tokens are single-use and rotate: using
 one revokes it and issues a replacement, so a stolen token cannot be replayed.
 Disabling an account revokes its outstanding refresh tokens immediately.
+
+### Registering the position webhook
+
+The Shelly pushes contact changes outbound, so nothing at the gate end needs to
+be reachable from the internet. Gen2 webhooks are plain `GET`s with no body —
+`Webhook.Create` takes a list of URLs and the device fetches them — so each
+event gets its own URL:
+
+| Event | URL |
+|---|---|
+| `input.toggle_on` | `https://<backend>/webhooks/gate-state/<token>/closed` |
+| `input.toggle_off` | `https://<backend>/webhooks/gate-state/<token>/not-closed` |
+
+`<token>` is `GATE_STATE_WEBHOOK_TOKEN`. Register them in the Shelly app under
+the device's *Actions*, or over RPC:
+
+```
+Webhook.Create {"cid": 100, "enable": true, "event": "input.toggle_on",
+                "urls": ["https://<backend>/webhooks/gate-state/<token>/closed"]}
+```
+
+`cid` is `SHELLY_INPUT_COMPONENT_ID`. Confirm the input is set to **detached**
+first — otherwise it drives the relay and the gate reopens itself every time it
+closes.
+
+**The URL contains a secret.** The device cannot send custom headers, so the
+token has to travel in the path. The backend rewrites it out of its own request
+log; the reverse proxy needs the same treatment (see `docs/DEPLOY.md`). This
+token can only report a position — it shares nothing with the trigger path and
+cannot move a gate — but it is still a secret and rotating it means re-running
+`Webhook.Create`.
+
+Webhooks are fire-and-forget: no retries, no queue, no delivery guarantee. A
+missed one is corrected by the 60-second reconciliation poll, which is the only
+reason that poll exists. If corrections show up in the log regularly, fix the
+webhooks rather than polling faster.
 
 ### Failures
 

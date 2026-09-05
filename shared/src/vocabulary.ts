@@ -1,7 +1,16 @@
 export const ROLES = ['owner', 'user'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const GATE_POSITIONS = ['open', 'closed', 'unknown'] as const;
+/**
+ * A reed contact on the leaf that closes last. It reports closed, or it
+ * reports not closed -- there is no 'open'. A gate stopped mid-travel, a gate
+ * standing fully open, and a gate with one leaf jammed all read identically,
+ * so naming any of them 'open' would be a claim the hardware cannot support.
+ *
+ * 'unknown' means we genuinely have no reading: nothing seen yet, the gate is
+ * moving after a pulse, or the last reading is too stale to trust.
+ */
+export const GATE_POSITIONS = ['closed', 'not_closed', 'unknown'] as const;
 export type GatePosition = (typeof GATE_POSITIONS)[number];
 
 export const PULSE_OUTCOMES = [

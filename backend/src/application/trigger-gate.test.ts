@@ -3,7 +3,9 @@ import { TriggerGateUseCase } from './trigger-gate.js';
 import { AuditedTriggerGate } from './audited-trigger.js';
 import { RoleBasedAccessPolicy } from '../domain/access-policy.js';
 import { redact } from '../infrastructure/redact.js';
-import { FakeAuditLog, FakeClock, FakeGateCommand, FakeGrantRepo, FakeGuard, FakeUserRepo } from '../../test/fakes.js';
+import {
+  FakeAuditLog, FakeClock, FakeGateCommand, FakeGateState, FakeGrantRepo, FakeGuard, FakeUserRepo,
+} from '../../test/fakes.js';
 import type { User } from '../domain/user.js';
 import type { GateCommandPort, UserRepositoryPort } from '../domain/ports.js';
 
@@ -17,14 +19,16 @@ const owner: User = {
 };
 
 let clock: FakeClock, guard: FakeGuard, gate: FakeGateCommand, useCase: TriggerGateUseCase;
+let state: FakeGateState;
 
 beforeEach(() => {
   clock = new FakeClock();
   guard = new FakeGuard(clock);
   gate = new FakeGateCommand();
+  state = new FakeGateState();
   useCase = new TriggerGateUseCase(
     new FakeUserRepo([owner]), new FakeGrantRepo([]),
-    new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN,
+    new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN, state,
   );
 });
 
@@ -39,6 +43,29 @@ describe('TriggerGateUseCase', () => {
     expect(gate.calls).toBe(1);
   });
 
+  it('marks the position unknown after a pulse, on success and on timeout', async () => {
+    await useCase.execute('owner1', KEY);
+    expect(state.markedUnknown).toBe(1);
+
+    // A timed-out request may well have delivered the pulse. Leaving "Closed"
+    // on screen while the gate swings open is the exact lie the sensor exists
+    // to prevent, so the ambiguous case resolves the same conservative way --
+    // see 4.2: the outcome knowing least resolves most cautiously.
+    clock.advance(COOLDOWN * 3);
+    gate.setResult({ outcome: 'timeout' });
+    await useCase.execute('owner1', KEY2);
+    expect(state.markedUnknown).toBe(2);
+  });
+
+  it('leaves the position alone when the pulse is confirmed not to have landed', async () => {
+    gate.setResult({ outcome: 'device-offline' });
+    await useCase.execute('owner1', KEY);
+
+    // Nothing moved, so the last reading still stands. Blanking it here would
+    // throw away a good reading every time the pillar Wi-Fi drops.
+    expect(state.markedUnknown).toBe(0);
+  });
+
   it('rejects an unknown user without pulsing', async () => {
     const r = await useCase.execute('nobody', KEY);
     expect(r).toMatchObject({ ok: false, code: 'USER_UNKNOWN' });
@@ -49,7 +76,7 @@ describe('TriggerGateUseCase', () => {
     const u: User = { ...owner, id: 'u2', role: 'user' };
     const uc = new TriggerGateUseCase(
       new FakeUserRepo([u]), new FakeGrantRepo([]),
-      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN,
+      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN, state,
     );
     const r = await uc.execute('u2', KEY);
     expect(r).toMatchObject({ ok: false, code: 'ACCESS_DENIED' });
@@ -108,7 +135,7 @@ describe('TriggerGateUseCase', () => {
   it('reports ATTEMPT_IN_PROGRESS when replaying an unreleased claim', async () => {
     const slow = new TriggerGateUseCase(
       new FakeUserRepo([owner]), new FakeGrantRepo([]),
-      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN,
+      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN, state,
     );
     await guard.tryClaim({ idempotencyKey: KEY, cooldownMs: COOLDOWN, idempotencyWindowMs: 60_000 });
     const r = await slow.execute('owner1', KEY);
@@ -135,7 +162,7 @@ describe('TriggerGateUseCase', () => {
     };
     const uc = new TriggerGateUseCase(
       new FakeUserRepo([owner]), new FakeGrantRepo([]),
-      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN,
+      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN, state,
     );
     const r = await uc.execute('owner1', KEY);
     expect(r).toMatchObject({ ok: false, code: 'INTERNAL', replayed: false });
@@ -148,7 +175,7 @@ describe('TriggerGateUseCase', () => {
     };
     const uc = new TriggerGateUseCase(
       new FakeUserRepo([owner]), new FakeGrantRepo([]),
-      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN,
+      new RoleBasedAccessPolicy(), guard, throwingGate, clock, COOLDOWN, state,
     );
     const r = await uc.execute('owner1', KEY);
     expect(r).toMatchObject({ ok: false, code: 'INTERNAL' });
@@ -194,7 +221,7 @@ describe('TriggerGateUseCase', () => {
     };
     const uc = new TriggerGateUseCase(
       throwingUsers, new FakeGrantRepo([]),
-      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN,
+      new RoleBasedAccessPolicy(), guard, gate, clock, COOLDOWN, state,
     );
     const r = await uc.execute('owner1', KEY);
     expect(r).toMatchObject({ ok: false, code: 'INTERNAL', replayed: false });

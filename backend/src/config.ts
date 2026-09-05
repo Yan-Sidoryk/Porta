@@ -20,6 +20,25 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().min(1).default('0.0.0.0'),
+
+  // The reed contact on the pillar. The component id comes from
+  // Shelly.GetStatus and is the Add-on's input (100+), never the device's own
+  // built-in input:0 -- reading input:0 would report the state of the terminal
+  // wired to the gate board, not the magnet.
+  SHELLY_INPUT_COMPONENT_ID: z.coerce.number().int().nonnegative(),
+
+  // Its own secret, sharing nothing with the trigger path: this token can
+  // only report a position, and must never be able to open a gate.
+  GATE_STATE_WEBHOOK_TOKEN: z.string().min(32),
+
+  GATE_STATE_STALE_AFTER_MS: z.coerce.number().int().positive().default(300_000),
+  GATE_STATE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
+  // The first boolean in this config. An enum rather than a truthiness check
+  // so that REED_LOGIC_INVERTED=ture is a refusal to boot instead of a gate
+  // that silently reports backwards.
+  REED_LOGIC_INVERTED: z.enum(['true', 'false']).default('false')
+    .transform((value) => value === 'true'),
 });
 
 export interface Config {
@@ -31,6 +50,13 @@ export interface Config {
   jwtSecret: string;
   gateCooldownMs: number;
   shelly: ShellyConfig;
+  gateState: {
+    webhookToken: string;
+    inputComponentId: number;
+    staleAfterMs: number;
+    pollIntervalMs: number;
+    reedLogicInverted: boolean;
+  };
 }
 
 /**
@@ -75,6 +101,13 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       authKey: values.SHELLY_AUTH_KEY,
       deviceId: values.SHELLY_DEVICE_ID,
       timeoutMs: SHELLY_TIMEOUT_MS,
+    },
+    gateState: {
+      webhookToken: values.GATE_STATE_WEBHOOK_TOKEN,
+      inputComponentId: values.SHELLY_INPUT_COMPONENT_ID,
+      staleAfterMs: values.GATE_STATE_STALE_AFTER_MS,
+      pollIntervalMs: values.GATE_STATE_POLL_INTERVAL_MS,
+      reedLogicInverted: values.REED_LOGIC_INVERTED,
     },
   };
 }

@@ -83,11 +83,13 @@ Dependencies point inward only. `domain` must be unit-testable with no I/O.
   Ship `ShellyCloudGateCommandAdapter`. The design goal is that swapping to a
   `LocalRpcGateCommandAdapter` or `MqttGateCommandAdapter` later is a one-line
   change in the composition root and nothing else.
-- `GateStatePort` — `getState(): Promise<GateState>` where
-  `GateState = { position: 'open' | 'closed' | 'unknown', reachable: boolean, checkedAt: Date }`.
-  Ship `UnknownPositionStateAdapter`, which reports device reachability from the
-  Shelly API but always returns `position: 'unknown'`. Structure it so a future
-  reed-switch adapter drops in cleanly.
+- `GateStatePort` — `getState(): Promise<GateState>` where `GateState =
+  { position: 'closed' | 'not_closed' | 'unknown', reachable: boolean,
+  checkedAt: Date, lastReading: { position, at } | null }`. There is no 'open':
+  the reed contact reports a magnet or no magnet, and a gate stopped
+  mid-travel, standing open, or jammed on one leaf are the same reading.
+  Shipped as `ReedSwitchStateAdapter`; `UnknownPositionStateAdapter` remains as
+  the fallback for a deployment with no contact fitted.
 - `AccessPolicyPort` — `canOperate(user, at: Date): PolicyDecision`. Ship
   `RoleBasedAccessPolicy`. This is the seam for temporary guest access later.
 - `AuditLogPort`, `UserRepositoryPort`, `AccessGrantRepositoryPort`,

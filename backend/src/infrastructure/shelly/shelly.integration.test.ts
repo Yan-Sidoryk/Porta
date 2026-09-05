@@ -147,7 +147,7 @@ describe('UnknownPositionStateAdapter', () => {
 
     const state = await adapter.getState();
 
-    expect(state).toEqual({ position: 'unknown', reachable: true, checkedAt: clock.now() });
+    expect(state).toEqual({ position: 'unknown', reachable: true, lastReading: null, checkedAt: clock.now() });
     expect(seen[0]?.body).toEqual({ ids: ['testdevice'] });
     expect(seen[0]?.url).toContain('/v2/devices/api/get');
   });

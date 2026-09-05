@@ -12,6 +12,8 @@ const config = loadConfig({
   DATABASE_PATH: ':memory:',
   NODE_ENV: 'test',
   PUBLIC_URL: 'http://localhost:3000',
+  SHELLY_INPUT_COMPONENT_ID: '100',
+  GATE_STATE_WEBHOOK_TOKEN: 'w'.repeat(43),
 });
 
 let container: Container | null = null;

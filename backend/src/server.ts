@@ -1,6 +1,20 @@
 import { buildApp } from './api/app.js';
 import { buildContainer } from './composition-root.js';
 import { loadConfig } from './config.js';
+import { startGateStatePoll } from './infrastructure/shelly/gate-state-poll.js';
+
+/**
+ * The webhook token rides in the URL path -- the one place a Shelly can carry
+ * it, since Gen2 webhooks send no custom headers -- so the request logger
+ * would otherwise write the secret to disk on every contact change.
+ *
+ * `redact.paths` cannot mask part of a string, so the URL is rewritten before
+ * it is ever serialised. The reverse proxy logs the same URL and needs the
+ * same treatment; see docs/DEPLOY.md.
+ */
+const WEBHOOK_PREFIX = '/webhooks/gate-state/';
+const scrubUrl = (url: string): string =>
+  (url.startsWith(WEBHOOK_PREFIX) ? `${WEBHOOK_PREFIX}[redacted]` : url);
 
 // Throws before anything opens a socket if a secret is missing or production
 // is not behind https. Failing here is the point: not at 2am.
@@ -23,11 +37,37 @@ const app = buildApp(container, {
       ],
       censor: '[redacted]',
     },
+    serializers: {
+      req: (request: { method: string; url: string }) => ({
+        method: request.method,
+        url: scrubUrl(request.url),
+      }),
+    },
   },
 });
 
+// Started here rather than in the composition root: buildContainer() runs in
+// tests, and a container that opens a socket to Shelly on construction would
+// make every one of them talk to a real gate.
+//
+// It corrects drift from webhooks that were never delivered -- they are
+// fire-and-forget, so a missed event is gone for good -- and it is not the
+// liveness path. Do not shorten the interval to compensate for lost webhooks.
+const stopPoll = startGateStatePoll(
+  container.gateStateAdapter,
+  config.shelly,
+  container.clock,
+  {
+    intervalMs: config.gateState.pollIntervalMs,
+    inputComponentId: config.gateState.inputComponentId,
+    reedLogicInverted: config.gateState.reedLogicInverted,
+  },
+  app.log,
+);
+
 const shutdown = (signal: string): void => {
   app.log.info({ signal }, 'shutting down');
+  stopPoll();
   void app.close().then(() => {
     container.close();
     process.exit(0);

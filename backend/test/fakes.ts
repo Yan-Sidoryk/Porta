@@ -1,11 +1,13 @@
 import type {
   AccessGrantRepositoryPort, AuditEntry, AuditLogPort, ClockPort,
-  CommandGuardPort, GateCommandPort, GateStatePort, TokenServicePort,
-  UserRepositoryPort,
+  CommandGuardPort, GateCommandPort, GateStatePort, GateStateSinkPort,
+  TokenServicePort, UserRepositoryPort,
 } from '../src/domain/ports.js';
-import type { ClaimResult, GateState, PulseResult } from '../src/domain/gate.js';
+import type {
+  ClaimResult, GateState, PulseResult, ReadingSource,
+} from '../src/domain/gate.js';
 import type { AccessGrant, User } from '../src/domain/user.js';
-import type { PulseOutcome, Role } from '@gate/shared';
+import type { GatePosition, PulseOutcome, Role } from '@gate/shared';
 import { UNCONFIRMED_COOLDOWN_MULTIPLIER } from '../src/domain/constants.js';
 
 export class FakeClock implements ClockPort {
@@ -62,13 +64,25 @@ export class FakeGuard implements CommandGuardPort {
   }
 }
 
-export class FakeGateState implements GateStatePort {
+export class FakeGateState implements GateStatePort, GateStateSinkPort {
   /** An Error here is thrown instead of returned -- adapters do fail. */
-  constructor(private result: GateState | Error = { position: 'unknown', reachable: true, checkedAt: new Date(0) }) {}
+  constructor(private result: GateState | Error = { position: 'unknown', reachable: true, checkedAt: new Date(0), lastReading: null }) {}
   setResult(r: GateState | Error): void { this.result = r; }
   async getState(): Promise<GateState> {
     if (this.result instanceof Error) throw this.result;
     return this.result;
+  }
+
+  /** What the write side was told, in order. The trigger tests read these. */
+  readonly recorded: { position: GatePosition; source: ReadingSource; at: Date }[] = [];
+  markedUnknown = 0;
+
+  record(position: GatePosition, source: ReadingSource, at: Date): void {
+    this.recorded.push({ position, source, at });
+  }
+
+  markUnknown(): void {
+    this.markedUnknown += 1;
   }
 }
 

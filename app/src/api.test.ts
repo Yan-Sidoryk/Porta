@@ -58,7 +58,7 @@ function backend(url: string, init: RequestInit): Response {
   }
 
   if (path === '/gate/status') {
-    return json(200, { position: 'closed', reachable: true, checkedAt: '2026-09-02T12:00:00.000Z' });
+    return json(200, { position: 'closed', reachable: true, checkedAt: '2026-09-02T12:00:00.000Z', lastReading: null });
   }
   return json(200, []); // /audit
 }
@@ -79,7 +79,7 @@ describe('concurrent 401s', () => {
     const [status, audit] = await Promise.all([getStatus(), getAudit()]);
 
     expect(calls.filter((p) => p === '/auth/refresh')).toHaveLength(1);
-    expect(status).toEqual({ position: 'closed', reachable: true, checkedAt: '2026-09-02T12:00:00.000Z' });
+    expect(status).toEqual({ position: 'closed', reachable: true, checkedAt: '2026-09-02T12:00:00.000Z', lastReading: null });
     expect(audit).toEqual([]);
 
     // The rotated pair is still there. An emptied keystore is the login screen

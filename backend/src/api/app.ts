@@ -8,6 +8,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerGateRoutes } from './routes/gate.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerGrantRoutes } from './routes/grants.js';
+import { registerWebhookRoutes } from './routes/webhooks.js';
 
 /** Every request body here is a handful of short fields. */
 const BODY_LIMIT_BYTES = 16 * 1024;
@@ -62,6 +63,7 @@ export function buildApp(
   registerGateRoutes(app, container);
   registerAuditRoutes(app, container);
   registerGrantRoutes(app, container);
+  registerWebhookRoutes(app, container);
 
   return app;
 }

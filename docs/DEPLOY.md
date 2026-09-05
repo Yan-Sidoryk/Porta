@@ -95,8 +95,30 @@ curl -s https://porta-app.duckdns.org/gate/status -H "Authorization: Bearer $TOK
 ```
 
 `reachable: false` means the Shelly relay is offline, not that the deployment
-is broken. `position: "unknown"` is always correct — there is no position
-sensor, and the backend refuses to guess.
+is broken. `position: "unknown"` is correct whenever the backend has no
+trustworthy reading — before the first poll lands, after a pulse while the gate
+is moving, or once a reading has aged past `GATE_STATE_STALE_AFTER_MS`. It
+refuses to guess in all three cases; `lastReading` still shows what it last
+saw, so the app can put an age on it.
+
+**Keep the webhook token out of the access log.** The Shelly cannot send custom
+headers, so the token travels in the URL path. The backend rewrites it out of
+its own log, but Caddy logs the raw request line — either leave `log` off for
+this site, or filter the URI:
+
+```
+log {
+  format filter {
+    request>uri query {
+      replace *
+    }
+  }
+}
+```
+
+The token can only report a position — it shares nothing with the trigger path
+and cannot open a gate — but rotating it means re-running `Webhook.Create` on
+the device.
 
 To see whether the fault is the device or the path to it, use the read-only
 probe. It calls Shelly's `get` endpoint, never `set/switch`:

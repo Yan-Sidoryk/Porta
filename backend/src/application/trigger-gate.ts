@@ -1,7 +1,7 @@
 import type { ErrorCode, PulseOutcome } from '@gate/shared';
 import type {
   AccessGrantRepositoryPort, AccessPolicyPort, ClockPort,
-  CommandGuardPort, GateCommandPort, UserRepositoryPort,
+  CommandGuardPort, GateCommandPort, GateStateSinkPort, UserRepositoryPort,
 } from '../domain/ports.js';
 import { IDEMPOTENCY_WINDOW_MS } from '../domain/constants.js';
 
@@ -84,6 +84,7 @@ export class TriggerGateUseCase implements TriggerGate {
     private gate: GateCommandPort,
     private clock: ClockPort,
     private cooldownMs: number,
+    private state: GateStateSinkPort,
   ) {}
 
   async execute(userId: string, idempotencyKey: string): Promise<TriggerResult> {
@@ -124,6 +125,20 @@ export class TriggerGateUseCase implements TriggerGate {
       // -- we do not know whether the relay fired, so the claim stays held at
       // its full pessimistic 2x window rather than being narrowed or freed.
       const result = await this.gate.pulse();
+
+      // The gate is now moving, so any stored position is wrong. On 'timeout'
+      // too, not just 'success': a timed-out request may well have delivered
+      // the pulse, and the guard's own rule (see 4.2 in the design doc) is
+      // that the outcome knowing least resolves most conservatively. Leaving
+      // "Closed" on screen while the gate swings open is the exact lie this
+      // whole feature exists to avoid.
+      //
+      // A confirmed failure -- device-offline and friends -- is left alone:
+      // nothing moved, so the last reading still stands.
+      if (result.outcome === 'success' || result.outcome === 'timeout') {
+        this.state.markUnknown();
+      }
+
       await this.guard.release(claim.claimId, result.outcome);
       return toResult(result.outcome, false, this.cooldownMs, result.detail);
     } catch (err) {

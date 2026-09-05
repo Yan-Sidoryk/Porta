@@ -61,8 +61,27 @@ export const ErrorResponseSchema = z.object({
 
 export const GateStatusResponseSchema = z.object({
   position: z.enum(GATE_POSITIONS),
+  /**
+   * Whether the controller itself is up, which is a different fact from
+   * whether the position is fresh: Shelly Cloud lags a device offline by up
+   * to a minute, so these two disagree routinely and neither implies the
+   * other.
+   */
   reachable: z.boolean(),
   checkedAt: z.string().datetime(),
+  /**
+   * The last reading actually taken, still reported once it is too stale to
+   * stand as `position`. It is what lets the app say "last seen closed 12
+   * minutes ago" instead of either silence or a lie. Null before the first
+   * reading of a process.
+   *
+   * An object rather than two nullable fields: a position with no time is not
+   * a thing that should be representable.
+   */
+  lastReading: z.object({
+    position: z.enum(GATE_POSITIONS),
+    at: z.string().datetime(),
+  }).nullable(),
 });
 
 export const AuditEventSchema = z.object({

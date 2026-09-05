@@ -6,6 +6,8 @@ const base = {
   JWT_SECRET: 'x'.repeat(32), GATE_COOLDOWN_MS: '5000',
   DATABASE_PATH: ':memory:', NODE_ENV: 'development',
   PUBLIC_URL: 'http://localhost:3000',
+  SHELLY_INPUT_COMPONENT_ID: '100',
+  GATE_STATE_WEBHOOK_TOKEN: 'w'.repeat(43),
 };
 
 describe('loadConfig', () => {

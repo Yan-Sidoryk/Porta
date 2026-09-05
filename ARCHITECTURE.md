@@ -39,12 +39,13 @@ time-based access windows testable without waiting.
 
 ---
 
-## The ten ports and their adapters
+## The eleven ports and their adapters
 
 | Port | Real adapter | Test double |
 |---|---|---|
 | `GateCommandPort` | `ShellyCloudGateCommandAdapter` | `FakeGateCommand` |
-| `GateStatePort` | `UnknownPositionStateAdapter` | `FakeGateState` |
+| `GateStatePort` | `ReedSwitchStateAdapter` | `FakeGateState` |
+| `GateStateSinkPort` | `ReedSwitchStateAdapter` | `FakeGateState` |
 | `AccessPolicyPort` | `RoleBasedAccessPolicy` *(pure, lives in `domain/`)* | — |
 | `CommandGuardPort` | `SqliteCommandGuard` | `FakeGuard` |
 | `AuditLogPort` | `SqliteAuditLog` | `FakeAuditLog` |
@@ -65,9 +66,24 @@ Notes on the ones that are not obvious:
 - **`AccessPolicyPort.canOperate` takes grants as an argument** rather than
   fetching them. A policy that fetched would make the domain async and give it a
   database dependency; purity is the requirement with teeth.
-- **`UnknownPositionStateAdapter`** always reports `position: 'unknown'`. There
-  is no sensor. It reports only device reachability, and a future reed-switch
-  adapter replaces it without the port changing.
+- **`ReedSwitchStateAdapter`** answers from the last reading the Shelly pushed,
+  with no Shelly call on read. It implements both position ports:
+  `GateStatePort` for the app, and `GateStateSinkPort` for the three writers --
+  the webhook, the reconciliation poll, and the trigger path, which blanks the
+  position because a moving gate makes any stored one wrong.
+  **`UnknownPositionStateAdapter`** stays in the tree unused, as the documented
+  fallback for a deployment with no contact fitted; swapping it back is one
+  line in the composition root.
+- **`GateStateSinkPort` is split from `GateStatePort` on purpose.** The webhook
+  route may report a position and must never be able to command a gate, and
+  `TriggerGateUseCase` needs to blank a position without gaining the ability to
+  read one it must never predict from. The narrow types make both structural
+  rather than a matter of remembering.
+- **Nothing about position is persisted.** An earlier design kept a durable row
+  and then forced it to `unknown` on boot anyway -- the gate can be walked open
+  by the physical remote while the backend is down -- so the row could only be
+  overwritten before it was read. A restart starts `unknown` and the startup
+  poll resolves it within a second.
 - **`AuditLogPort` is append-only** and is never queried for safety decisions.
 
 ---
@@ -163,9 +179,10 @@ on them rather than on the transport:
 3. Return diagnostic text on `PulseResult.detail`, already redacted. It reaches
    the audit log and nothing else.
 
-`GateStatePort` would be swapped alongside it — and a reed switch, if one is
-ever fitted, replaces `UnknownPositionStateAdapter` with something that returns
-a real `position` without the port changing.
+`GateStatePort` is unaffected by that swap. It already reads from
+`ReedSwitchStateAdapter`'s own in-memory reading rather than from Shelly, so
+only the reconciliation poll and the webhook registration would need to move to
+a local transport.
 
 Note that the backend talks to **Shelly Cloud**, not to the relay on the LAN,
 so today it can run anywhere. A local adapter would require it to run on the

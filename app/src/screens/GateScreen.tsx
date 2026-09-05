@@ -1,12 +1,12 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { AppState, Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import type { AuditEvent, GateStatusResponse } from '@gate/shared';
 import { getAudit, getStatus, logout, trigger, type ApiFailure } from '../api';
 import {
-  canTap, controllerView, cooldownProgress, nextState, secondsLeft, tapIsFinished,
-  type GateUiState,
+  canTap, cooldownProgress, gateStatusView, isAwaitingReading, nextState,
+  secondsLeft, tapIsFinished, type GateUiState,
 } from '../gate-machine';
 import { Ionicons } from '@expo/vector-icons';
 import { GateButton } from '../components/GateButton';
@@ -28,6 +28,25 @@ const TICK_MS = 250;
 
 /** How long a result message stays before clearing itself. Tune to taste. */
 const BANNER_VISIBLE_MS = 10_000;
+
+/**
+ * How often to re-ask while the gate is mid-answer.
+ *
+ * This hits our own backend, which answers from memory -- it does NOT reach
+ * Shelly and does not touch the one-request-per-second budget the trigger
+ * path shares. Three seconds is well inside a gate's swing, so the status
+ * flips to Closed on its own within a few seconds of the gate finishing.
+ */
+const WATCH_INTERVAL_MS = 3000;
+
+/**
+ * When to give up watching. A gate resolves within a swing -- even stopped
+ * mid-travel reads 'not closed', which is a definite answer -- so a position
+ * still unknown after this long means the sensor or the link to it is broken,
+ * not that the gate is slow. Polling on past that would drain a battery to
+ * re-learn the same non-answer.
+ */
+const WATCH_ATTEMPTS = 30;
 
 /**
  * Space the message strip always occupies, whether it holds nothing, one line
@@ -172,11 +191,10 @@ export function GateScreen({ onSignedOut }: Props) {
   }, [onSignedOut]);
 
   /**
-   * This one reaches Shelly Cloud, which is rate limited to one request per
-   * second across the whole backend. Deliberately NOT called after a tap: the
-   * pulse has just spent that slot, and reachability lags by up to a minute
-   * anyway, so a read one second later cannot say anything new -- it would
-   * only fail and make the screen look like the controller had dropped.
+   * Cheap now: the backend answers from the reading the Shelly pushed to it,
+   * so this no longer spends the account's one-request-per-second Shelly slot
+   * and can be called freely -- including straight after a tap, which is
+   * exactly when the position has changed and the screen is being watched.
    */
   const refreshStatus = useCallback(async (): Promise<void> => {
     const status = await getStatus();
@@ -191,6 +209,52 @@ export function GateScreen({ onSignedOut }: Props) {
     void refreshStatus();
     void refreshActivity();
   }, [refreshStatus, refreshActivity]);
+
+  // Coming back to the app is the moment the screen is actually read, and the
+  // reading it is holding may be minutes old by then -- the gate moves on the
+  // physical remote whether this app is running or not.
+  //
+  // App.tsx has its own AppState listener, but that one owns the biometric
+  // re-lock and sits a component above the fetching.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      setNow(Date.now());
+      void refreshStatus();
+      void refreshActivity();
+    });
+    return () => subscription.remove();
+  }, [refreshStatus, refreshActivity]);
+
+  /**
+   * Keeps asking while the gate is moving, so the screen resolves itself.
+   *
+   * The gap this closes: the refresh fired straight after a tap necessarily
+   * reads 'unknown' -- the gate has only just started moving -- and nothing
+   * else re-reads until the user foregrounds or pulls. Someone who taps and
+   * then watches the screen would see a frozen 'Unknown' long after the
+   * backend had been told the gate finished closing.
+   *
+   * `awaiting` stays true across refreshes that are still unknown, so the
+   * effect is not torn down and the attempt count keeps counting. It flips
+   * false the moment a real reading lands, which clears the interval.
+   */
+  const awaiting = isAwaitingReading(reading);
+  useEffect(() => {
+    if (!awaiting) return;
+
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      if (attempts > WATCH_ATTEMPTS) {
+        clearInterval(timer);
+        return;
+      }
+      void refreshStatus();
+    }, WATCH_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [awaiting, refreshStatus]);
 
   const onTap = async (): Promise<void> => {
     if (!canTap(state, Date.now())) return;
@@ -229,8 +293,11 @@ export function GateScreen({ onSignedOut }: Props) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
 
-    // Activity only. See refreshStatus for why the controller is not re-read.
+    // Both: the pulse set the position back to unknown, and the app should
+    // say so rather than leaving the pre-tap reading on screen while the gate
+    // is visibly moving.
     void refreshActivity();
+    void refreshStatus();
   };
 
   const tappable = canTap(state, now);
@@ -313,7 +380,12 @@ export function GateScreen({ onSignedOut }: Props) {
           </Pressable>
         </View>
 
-        <StatusPanel view={controllerView(reading)} use24h={use24h} />
+        {/* ponytail: `now` only ticks during a cooldown, so a stale reading's
+            "12 minutes ago" freezes on an idle screen until the next
+            foreground, pull, or tap re-reads it. Waking the JS thread on an
+            idle screen to age a line nobody is looking at costs more than it
+            buys; give this its own slow interval if that stops being true. */}
+        <StatusPanel view={gateStatusView(reading, now)} use24h={use24h} />
       </View>
 
       <Banner message={banner} />

@@ -52,6 +52,13 @@ export function registerGateRoutes(app: FastifyInstance, container: Container): 
       position: state.position,
       reachable: state.reachable,
       checkedAt: state.checkedAt.toISOString(),
+      // Still reported once too stale to stand as `position`: it is what lets
+      // the app say "last seen closed 12 minutes ago" rather than going silent
+      // or, worse, showing the old value as though it were current.
+      lastReading: state.lastReading === null ? null : {
+        position: state.lastReading.position,
+        at: state.lastReading.at.toISOString(),
+      },
     });
   });
 }

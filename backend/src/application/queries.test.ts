@@ -8,11 +8,16 @@ const NOW = new Date('2026-08-20T12:00:00Z');
 describe('GetGateStatusUseCase', () => {
   it('passes the adapter reading through', async () => {
     const checkedAt = new Date('2026-08-20T11:59:00Z');
+    const lastReading = { position: 'closed' as const, at: checkedAt };
     const status = new GetGateStatusUseCase(
-      new FakeGateState({ position: 'unknown', reachable: true, checkedAt }),
+      new FakeGateState({ position: 'unknown', reachable: true, checkedAt, lastReading }),
       new FakeClock(NOW),
     );
-    expect(await status.execute()).toEqual({ position: 'unknown', reachable: true, checkedAt });
+    // lastReading survives the pass-through: it is the difference between the
+    // app saying "last seen closed 12 minutes ago" and saying nothing.
+    expect(await status.execute()).toEqual({
+      position: 'unknown', reachable: true, checkedAt, lastReading,
+    });
   });
 
   it('reports unreachable instead of throwing when the adapter fails', async () => {
@@ -22,7 +27,7 @@ describe('GetGateStatusUseCase', () => {
       new FakeGateState(new Error('getaddrinfo ENOTFOUND shelly')),
       new FakeClock(NOW),
     );
-    expect(await status.execute()).toEqual({ position: 'unknown', reachable: false, checkedAt: NOW });
+    expect(await status.execute()).toEqual({ position: 'unknown', reachable: false, checkedAt: NOW, lastReading: null });
   });
 });
 

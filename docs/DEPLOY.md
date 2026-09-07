@@ -103,8 +103,12 @@ saw, so the app can put an age on it.
 
 **Keep the webhook token out of the access log.** The Shelly cannot send custom
 headers, so the token travels in the URL path. The backend rewrites it out of
-its own log, but Caddy logs the raw request line — either leave `log` off for
-this site, or filter the URI:
+its own log.
+
+The deployed Caddyfile has no `log` directive, so Caddy records no requests at
+all — checked 2026-09-07, and the reason nothing had to be done at deploy time.
+That is the current protection, and it is accidental rather than chosen. If
+access logging is ever turned on for this site, filter the URI first:
 
 ```
 log {

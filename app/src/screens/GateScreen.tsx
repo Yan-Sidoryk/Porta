@@ -54,17 +54,18 @@ const WATCH_INTERVAL_MS = 3000;
 const WATCH_ATTEMPTS = 30;
 
 /**
- * Space the message strip always occupies, whether it holds nothing, one line
- * or three. Reserved so the button below never moves: a control that shifts
- * under a thumb as a message arrives is how a second tap gets sent by accident.
+ * Space the message strip always occupies, whether it holds a position or a
+ * result message. Reserved so the button below never moves: a control that
+ * shifts under a thumb as a message arrives is how a second tap gets sent by
+ * accident.
+ *
+ * Sized for the tallest thing it ever holds, a three-line message:
+ * 3 x 20 line height + 32 padding. The longest strings in MESSAGES run to
+ * three lines on a narrow phone, so reserving for two would put the hop back
+ * for exactly the errors most worth reading.
+ *
  * A minimum rather than a fixed height, so large accessibility text grows
  * instead of being clipped.
- */
-/**
- * Sized for the tallest thing the strip ever holds, which is a three-line
- * message: 3 x 20 line height + 32 padding. The longest strings in MESSAGES
- * run to three lines on a narrow phone, so reserving for two would put the
- * hop back for exactly the errors most worth reading.
  */
 const BANNER_MIN_HEIGHT = 92;
 
@@ -105,7 +106,10 @@ interface BannerMessage {
 /** The position's semantic tone, resolved against the theme. */
 const POSITION_TONE: Record<PositionBanner['tone'], string> = {
   ok: colors.ok,
-  warn: colors.warn,
+  // The same red a failed pulse gets. Deliberately overloaded: an open gate
+  // is not a fault, but it is the state worth noticing from a car pulling
+  // away, and red is what carries at that distance.
+  alert: colors.danger,
   muted: colors.textDim,
 };
 

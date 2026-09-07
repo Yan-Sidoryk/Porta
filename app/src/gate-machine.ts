@@ -185,10 +185,20 @@ export function controllerView(
  * `StatusPanel` above already carries both -- "Controller offline" and
  * "Last seen 21:34" -- and saying either twice makes the screen slower to
  * read, which is the one thing this element cannot afford.
+ *
+ * OPEN is red, the same red a failed pulse gets. That overloads the colour:
+ * an open gate is a normal state half the time, not a fault. It was chosen
+ * anyway, because red is what survives a glance from a car already moving
+ * and "you left it open" is the thing worth noticing. Nothing depends on
+ * reading the colour -- the words carry it on their own.
+ *
+ * UNKNOWN stays muted rather than joining the red/green pair. Not knowing is
+ * not an alarm, and giving it a colour from that vocabulary would imply a
+ * position.
  */
 export interface PositionBanner {
   text: string;
-  tone: 'ok' | 'warn' | 'muted';
+  tone: 'ok' | 'alert' | 'muted';
   /**
    * Small qualifier set above the word, used when the word is no longer
    * current. Kept as its own field rather than folded into `text` so the
@@ -216,7 +226,7 @@ export function positionBanner(
 
   const status = reading as GateStatusResponse;
   if (status.position === 'closed') return { text: 'CLOSED', tone: 'ok' };
-  if (status.position === 'not_closed') return { text: 'OPEN', tone: 'warn' };
+  if (status.position === 'not_closed') return { text: 'OPEN', tone: 'alert' };
 
   // Unconfirmed. Show what we last saw, marked as no longer current.
   const last = status.lastReading;

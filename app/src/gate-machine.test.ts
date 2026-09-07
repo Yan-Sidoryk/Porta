@@ -164,14 +164,14 @@ describe('positionBanner', () => {
     position: 'unknown', reachable: true, checkedAt: CHECKED, lastReading: null, ...over,
   });
 
-  it('reads at a glance: CLOSED green, OPEN amber, UNKNOWN muted', () => {
+  it('reads at a glance: CLOSED green, OPEN red, UNKNOWN muted', () => {
     expect(positionBanner(reading({ position: 'closed' })))
       .toEqual({ text: 'CLOSED', tone: 'ok' });
 
     // 'not_closed' renders OPEN deliberately -- see the doc comment. The
     // precise word survives on the wire; the driver gets the readable one.
     expect(positionBanner(reading({ position: 'not_closed' })))
-      .toEqual({ text: 'OPEN', tone: 'warn' });
+      .toEqual({ text: 'OPEN', tone: 'alert' });
 
     expect(positionBanner(reading({ position: 'unknown' })))
       .toEqual({ text: 'UNKNOWN', tone: 'muted' });

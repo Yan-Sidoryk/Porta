@@ -247,8 +247,8 @@ export function GateScreen({ onSignedOut }: Props) {
    * and can be called freely -- including straight after a tap, which is
    * exactly when the position has changed and the screen is being watched.
    */
-  const refreshStatus = useCallback(async (): Promise<void> => {
-    const status = await getStatus();
+  const refreshStatus = useCallback(async (fresh = false): Promise<void> => {
+    const status = await getStatus(fresh);
     if ('ok' in status && status.ok === false && status.code === 'SESSION_EXPIRED') {
       onSignedOut();
       return;
@@ -409,7 +409,10 @@ export function GateScreen({ onSignedOut }: Props) {
             // Safe: the backend guard still rejects a genuinely early tap.
             setState((current) => (current.kind === 'sending' ? { kind: 'idle' } : current));
             setRefreshing(true);
-            void Promise.all([refreshStatus(), refreshActivity()])
+            // `true` only here: a pull is the user asking for the truth, so
+            // it is worth a direct sensor read. Every other refresh takes the
+            // free answer -- see getStatus.
+            void Promise.all([refreshStatus(true), refreshActivity()])
               .finally(() => setRefreshing(false));
           }}
         />

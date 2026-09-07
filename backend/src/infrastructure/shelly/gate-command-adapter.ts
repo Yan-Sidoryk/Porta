@@ -5,6 +5,12 @@ import { redact } from '../redact.js';
 import { shellyPost, type ShellyConfig } from './client.js';
 
 const ERROR_TO_OUTCOME: Record<string, PulseOutcome> = {
+  // Shelly limits per ACCOUNT, about one request a second, shared by the
+  // pulse, the reconciliation poll and every on-demand read. Unmapped, this
+  // fell through to 'error' -> INTERNAL -> "Something went wrong", which is a
+  // gate that silently did not open. It is a confirmed non-delivery, so a
+  // retry is safe and the message should say so.
+  TOO_MANY_REQUESTS: 'rate-limited',
   DEVICE_OFFLINE: 'device-offline',
   DEVICE_FAILED_COMMAND: 'device-failed',
   BAD_REQUEST: 'bad-request',

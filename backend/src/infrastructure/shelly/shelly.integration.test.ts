@@ -137,6 +137,48 @@ describe('ShellyCloudGateCommandAdapter', () => {
   });
 });
 
+describe('the shared Shelly lane', () => {
+  it('serialises CONCURRENT callers, not just sequential ones', async () => {
+    // Sequential spacing is not the hard case; concurrent arrival is. A lone
+    // sleep wakes every waiter on the same deadline and they all fire at once
+    // -- the gap re-check in waitForSlot is what makes it a mutex, and this is
+    // the test that says so. The pulse, the poll, the settle read and
+    // pull-to-refresh share one account, and TOO_MANY_REQUESTS on the trigger
+    // path is a gate that does not open.
+    const arrivals: number[] = [];
+    const { host } = await start(() => {
+      arrivals.push(Date.now());
+      return { status: 200, json: {} };
+    });
+    const adapter = new ShellyCloudGateCommandAdapter(config(host));
+
+    await Promise.all([adapter.pulse(), adapter.pulse(), adapter.pulse()]);
+
+    // Measured where the requests LAND, so it carries a few ms of HTTP jitter
+    // either way -- the slot is claimed a moment before the socket opens. The
+    // bound only has to separate "serialised" (about a second) from "all at
+    // once" (single-digit ms), which is what the old implementation did.
+    expect(arrivals).toHaveLength(3);
+    for (let i = 1; i < arrivals.length; i += 1) {
+      expect((arrivals[i] ?? 0) - (arrivals[i - 1] ?? 0)).toBeGreaterThan(900);
+    }
+  }, 20_000);
+
+  it('maps TOO_MANY_REQUESTS to a retryable outcome, not a generic failure', async () => {
+    // Unmapped this fell through to 'error' -> INTERNAL -> "Something went
+    // wrong", for what is actually a confirmed non-delivery the user can
+    // simply retry.
+    const { host } = await start(() => ({
+      status: 429,
+      json: { error: 'TOO_MANY_REQUESTS', data: { messages: ['slow down'] } },
+    }));
+
+    const result = await new ShellyCloudGateCommandAdapter(config(host)).pulse();
+
+    expect(result.outcome).toBe('rate-limited');
+  }, 20_000);
+});
+
 describe('UnknownPositionStateAdapter', () => {
   it('reports reachable when the device is online, position always unknown', async () => {
     const { host, seen } = await start(() => ({

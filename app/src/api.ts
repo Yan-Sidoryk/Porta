@@ -185,8 +185,17 @@ export async function getAudit(limit = 20): Promise<AuditEvent[] | ApiFailure> {
   return parsed.success ? parsed.data : unexpected();
 }
 
-export async function getStatus(): Promise<GateStatusResponse | ApiFailure> {
-  const reply = await authed('/gate/status', { method: 'GET' });
+/**
+ * `fresh` makes the backend take a direct sensor reading before answering,
+ * instead of replying from the state the webhook last pushed it.
+ *
+ * Only pull-to-refresh sets it. It costs a slot from Shelly's per-account
+ * one-request-per-second budget, which the gate button shares, so every
+ * other caller takes the free answer -- the webhook keeps it current within
+ * a second or so anyway.
+ */
+export async function getStatus(fresh = false): Promise<GateStatusResponse | ApiFailure> {
+  const reply = await authed(`/gate/status${fresh ? '?fresh=1' : ''}`, { method: 'GET' });
   if (!reply) return unreachable();
   if (reply.status !== 200) return toFailure(reply.body);
 

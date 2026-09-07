@@ -41,6 +41,11 @@ const EnvSchema = z.object({
   // reading at all.
   GATE_STATE_SETTLE_AFTER_MS: z.coerce.number().int().positive().default(20_000),
 
+  // Least gap between two pull-to-refresh reads. Caps how much of the Shelly
+  // budget an impatient user can spend, and with it how long a gate pulse can
+  // end up queued behind them.
+  GATE_STATE_REFRESH_MIN_GAP_MS: z.coerce.number().int().positive().default(10_000),
+
   // The first boolean in this config. An enum rather than a truthiness check
   // so that REED_LOGIC_INVERTED=ture is a refusal to boot instead of a gate
   // that silently reports backwards.
@@ -63,6 +68,7 @@ export interface Config {
     staleAfterMs: number;
     pollIntervalMs: number;
     settleAfterMs: number;
+    refreshMinGapMs: number;
     reedLogicInverted: boolean;
   };
 }
@@ -116,6 +122,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       staleAfterMs: values.GATE_STATE_STALE_AFTER_MS,
       pollIntervalMs: values.GATE_STATE_POLL_INTERVAL_MS,
       settleAfterMs: values.GATE_STATE_SETTLE_AFTER_MS,
+      refreshMinGapMs: values.GATE_STATE_REFRESH_MIN_GAP_MS,
       reedLogicInverted: values.REED_LOGIC_INVERTED,
     },
   };

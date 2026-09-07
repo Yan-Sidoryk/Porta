@@ -46,19 +46,32 @@ export function registerGateRoutes(app: FastifyInstance, container: Container): 
     });
   });
 
-  app.get('/gate/status', { preHandler }, async (_request, reply) => {
-    const state = await container.gateStatus.execute();
-    return reply.send({
-      position: state.position,
-      reachable: state.reachable,
-      checkedAt: state.checkedAt.toISOString(),
-      // Still reported once too stale to stand as `position`: it is what lets
-      // the app say "last seen closed 12 minutes ago" rather than going silent
-      // or, worse, showing the old value as though it were current.
-      lastReading: state.lastReading === null ? null : {
-        position: state.lastReading.position,
-        at: state.lastReading.at.toISOString(),
-      },
-    });
-  });
+  app.get<{ Querystring: { fresh?: string } }>(
+    '/gate/status',
+    { preHandler },
+    async (request, reply) => {
+      // Pull-to-refresh, and nothing else. Every other caller -- mount,
+      // foreground, the watch loop while a gate is moving -- answers from
+      // memory, because the webhook keeps it current within a second and a
+      // Shelly read costs a slot the gate button also needs.
+      //
+      // Throttled and de-duplicated inside the poll, which owns the
+      // connection. If the read fails, the stored state answers anyway.
+      if (request.query.fresh === '1') await container.gateStateAdapter.readNow?.();
+
+      const state = await container.gateStatus.execute();
+      return reply.send({
+        position: state.position,
+        reachable: state.reachable,
+        checkedAt: state.checkedAt.toISOString(),
+        // Still reported once too stale to stand as `position`: it is what
+        // lets the app say "last seen closed 12 minutes ago" rather than
+        // going silent or, worse, showing the old value as current.
+        lastReading: state.lastReading === null ? null : {
+          position: state.lastReading.position,
+          at: state.lastReading.at.toISOString(),
+        },
+      });
+    },
+  );
 }

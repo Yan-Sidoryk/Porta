@@ -24,14 +24,28 @@ const MIN_REQUEST_GAP_MS = 1000;
 // and move it behind a port if the backend ever runs on more than one node.
 let nextAllowedAt = 0;
 
+/**
+ * Resolves once this caller owns the next slot.
+ *
+ * A loop, not a single sleep, and that carries more weight than it looks.
+ * setTimeout is allowed to fire a millisecond or two early against
+ * Date.now(), and on Windows routinely does, so one sleep leaves the gap a
+ * hair under a second and lets the account trip Shelly's own limiter.
+ *
+ * Re-reading the deadline after each sleep also makes this a real mutex under
+ * concurrency, which one sleep is not: with a lone sleep every waiter wakes on
+ * the same deadline and they all fire together (measured: three callers all
+ * landing at 1008ms). Here the last re-read and the write below have no await
+ * between them, so on a single-threaded runtime exactly one caller can pass
+ * (measured: 1006, 2012, 3023).
+ *
+ * That matters because the pulse, the reconciliation poll, the post-pulse
+ * settle read and pull-to-refresh all share one account, and TOO_MANY_REQUESTS
+ * on the trigger path is a gate that does not open.
+ */
 async function waitForSlot(): Promise<void> {
   // Wall clock, not ClockPort: this pairs with setTimeout, and a fake clock
   // would sit here forever.
-  //
-  // A loop, not a single sleep: setTimeout is allowed to fire a millisecond
-  // or two early against Date.now(), and on Windows routinely does. One sleep
-  // therefore leaves the gap a hair under a second and lets the account trip
-  // Shelly's own limiter, which answers TOO_MANY_REQUESTS.
   for (let wait = nextAllowedAt - Date.now(); wait > 0; wait = nextAllowedAt - Date.now()) {
     await new Promise((resolve) => { setTimeout(resolve, wait); });
   }

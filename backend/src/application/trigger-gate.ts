@@ -46,6 +46,9 @@ const OUTCOME_TO_CODE: Record<Exclude<PulseOutcome, 'success'>, ErrorCode> = {
   'device-failed': 'DEVICE_FAILED_COMMAND',
   'bad-request': 'BAD_REQUEST',
   'device-not-found': 'DEVICE_NOT_FOUND',
+  // Confirmed non-delivery: Shelly rejected the call, so no pulse was sent
+  // and trying again shortly is safe.
+  'rate-limited': 'RATE_LIMITED',
   error: 'INTERNAL',
 };
 

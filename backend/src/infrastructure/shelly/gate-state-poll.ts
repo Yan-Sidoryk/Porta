@@ -16,6 +16,16 @@ export interface PollOptions {
    * gate that is already swinging open.
    */
   settleAfterMs: number;
+  /**
+   * Least time between two on-demand reads. A pull inside the window answers
+   * from memory instead.
+   *
+   * This is what makes waiting for the lane safe: the lane is a strict queue,
+   * so without a cap three impatient pulls would put three requests in front
+   * of the next gate pulse. With it, at most one on-demand read is ever
+   * pending and a pulse waits one slot at worst.
+   */
+  refreshMinGapMs: number;
   inputComponentId: number;
   reedLogicInverted: boolean;
 }
@@ -173,6 +183,29 @@ export function startGateStatePoll(
     }
   };
 
+  // One in flight at a time, shared by everyone waiting on it -- the same
+  // shape as the token refresh in the app's api.ts, and for the same reason:
+  // concurrent callers want the same answer, not their own request each.
+  let inFlight: Promise<void> | null = null;
+  let lastForcedAt = 0;
+
+  adapter.readNow = async () => {
+    const since = Date.now() - lastForcedAt;
+    if (inFlight === null && since < options.refreshMinGapMs) return;
+
+    inFlight ??= tick()
+      .catch(() => {
+        // Same contract as the interval: a failed read records nothing and
+        // never throws at its caller. The route still answers from memory.
+      })
+      .finally(() => {
+        lastForcedAt = Date.now();
+        inFlight = null;
+      });
+
+    await inFlight;
+  };
+
   adapter.onMoving = () => {
     cancelSettle();
     settleTimer = setTimeout(() => {
@@ -185,8 +218,9 @@ export function startGateStatePoll(
   return () => {
     clearInterval(timer);
     cancelSettle();
-    // Unsubscribe as well: a pulse arriving after shutdown must not wake a
-    // poll that is meant to be stopped.
+    // Unsubscribe as well: neither a pulse nor a pull arriving after shutdown
+    // may wake a poll that is meant to be stopped.
     delete adapter.onMoving;
+    delete adapter.readNow;
   };
 }

@@ -15,7 +15,7 @@ export type GatePosition = (typeof GATE_POSITIONS)[number];
 
 export const PULSE_OUTCOMES = [
   'success', 'timeout', 'device-offline', 'device-failed',
-  'bad-request', 'device-not-found', 'error',
+  'bad-request', 'device-not-found', 'rate-limited', 'error',
 ] as const;
 export type PulseOutcome = (typeof PULSE_OUTCOMES)[number];
 

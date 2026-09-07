@@ -49,8 +49,9 @@ const config = (host: string) => ({
 
 // The interval is parked out of reach so each test drives its own reads.
 const SETTLE_MS = 150;
+const REFRESH_GAP_MS = 400;
 const options = {
-  intervalMs: 3_600_000, settleAfterMs: SETTLE_MS,
+  intervalMs: 3_600_000, settleAfterMs: SETTLE_MS, refreshMinGapMs: REFRESH_GAP_MS,
   inputComponentId: 100, reedLogicInverted: false,
 };
 const silent = { warn: () => {} };
@@ -388,5 +389,88 @@ describe('settle read after a pulse', () => {
 
     expect(adapter.lastPosition()).toBeNull();
     expect((await adapter.getState()).position).toBe('unknown');
+  }, 20_000);
+});
+
+describe('forced read (pull-to-refresh)', () => {
+  it('takes a direct reading on demand', async () => {
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+
+    // The webhook that never arrived: the store thinks the gate is open.
+    adapter.record('not_closed', 'webhook', clock.now());
+    const before = count();
+
+    await adapter.readNow?.();
+    stop();
+
+    expect(count()).toBe(before + 1);
+    expect((await adapter.getState()).position).toBe('closed');
+  }, 20_000);
+
+  it('answers from memory inside the throttle window', async () => {
+    // What stops an impatient user spending the account's budget -- and, now
+    // that the lane is a strict queue, putting requests in front of a pulse.
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+
+    await adapter.readNow?.();
+    const afterFirst = count();
+    await adapter.readNow?.();
+    await adapter.readNow?.();
+    expect(count()).toBe(afterFirst);
+
+    // ...and opens up again once the window has passed.
+    await pause(REFRESH_GAP_MS + 100);
+    await adapter.readNow?.();
+    stop();
+
+    expect(count()).toBe(afterFirst + 1);
+  }, 20_000);
+
+  it('shares one request between concurrent pulls', async () => {
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+    const before = count();
+
+    await Promise.all([adapter.readNow?.(), adapter.readNow?.(), adapter.readNow?.()]);
+    stop();
+
+    expect(count()).toBe(before + 1);
+  }, 20_000);
+
+  it('is a no-op once the poll has stopped', async () => {
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+    stop();
+
+    expect(adapter.readNow).toBeUndefined();
+    const atStop = count();
+    await pause(QUIET_MS);
+    expect(count()).toBe(atStop);
   }, 20_000);
 });

@@ -57,7 +57,7 @@ function backend(url: string, init: RequestInit): Response {
     return expired();
   }
 
-  if (path === '/gate/status') {
+  if (path.startsWith('/gate/status')) {
     return json(200, { position: 'closed', reachable: true, checkedAt: '2026-09-02T12:00:00.000Z', lastReading: null });
   }
   return json(200, []); // /audit
@@ -111,5 +111,25 @@ describe('concurrent 401s', () => {
 
     expect(await getStatus()).toMatchObject({ position: 'closed' });
     expect(calls.filter((p) => p === '/auth/refresh')).toHaveLength(1);
+  });
+});
+
+describe('getStatus(fresh)', () => {
+  it('asks for a direct sensor read only when told to', async () => {
+    // The plain call must stay free. It runs on mount, on foreground, and
+    // every 3s while a gate is moving -- putting a Shelly request behind each
+    // of those would spend the account's one-per-second budget, which the
+    // gate button shares, on an answer the webhook already pushed.
+    await getStatus();
+    expect(calls).toContain('/gate/status');
+    // Exact paths, not a substring: `/auth/refresh` contains "fresh", and a
+    // stale access token means this call makes one.
+    expect(calls).not.toContain('/gate/status?fresh=1');
+
+    calls = [];
+
+    // Pull-to-refresh is the exception: the user asking outright.
+    await getStatus(true);
+    expect(calls).toContain('/gate/status?fresh=1');
   });
 });

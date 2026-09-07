@@ -72,6 +72,17 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
    */
   onMoving?: () => void;
 
+  /**
+   * Also set by the poll: take one direct read NOW and resolve when it has
+   * landed. Backs pull-to-refresh, the one gesture that unambiguously means
+   * "I want the truth right now" -- every other route to the real sensor is
+   * on a timer.
+   *
+   * Throttled and de-duplicated by the poll, not here. This adapter still
+   * never opens a socket.
+   */
+  readNow?: () => Promise<void>;
+
   markUnknown(): void {
     // `confirmedAt` is deliberately NOT advanced: a pulse we sent is not
     // evidence that anyone read the contact. Clearing the reading is enough

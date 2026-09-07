@@ -505,7 +505,14 @@ cannot move a gate — but it is still a secret and rotating it means re-running
 Webhooks are fire-and-forget: no retries, no queue, no delivery guarantee. A
 missed one is corrected by the reconciliation poll -- every 60 seconds, and
 once 20 seconds after each pulse, which is when a lost event matters most and
-when the gate has just finished travelling. If corrections show up in the log regularly, fix the
+when the gate has just finished travelling.
+
+Pull-to-refresh also forces a direct read (`GET /gate/status?fresh=1`). It is
+the one gesture that unambiguously means "tell me the truth now", so it is the
+one that spends a Shelly request; every other caller answers from memory.
+Throttled to `GATE_STATE_REFRESH_MIN_GAP_MS`, because Shelly limits per ACCOUNT
+at roughly one request a second and the gate button shares that lane -- an
+unbounded pull would queue requests in front of a pulse. If corrections show up in the log regularly, fix the
 webhooks rather than polling faster.
 
 ### Failures

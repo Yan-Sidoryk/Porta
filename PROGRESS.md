@@ -8,7 +8,8 @@ Those two plus `git log` are enough to know exactly where things stand.
 Execution ledger with every ruling:
 `.superpowers/sdd/2026-08-19-gate-opener-backend/progress.md` (git-ignored).
 
-## Status: milestones 1–7 built and deployed. Final review remains.
+## Status: milestones 1–7 built and deployed. Gate position sensor built,
+not yet deployed — see below. Final review remains.
 
 The backend, the app and both documents are done, and the backend is live at
 `https://porta-app.duckdns.org`. What is left is a fresh-context review of the
@@ -364,6 +365,101 @@ the countdown to render the server's `retryAfterMs`, but the **success**
 response carried none — only the 409 did. So the commonest path left the button
 live for an immediate second tap. `TriggerResponseSchema` now carries it on
 success too.
+
+## Gate position sensor — built 2026-09-03..07, NOT YET DEPLOYED
+
+Spec: `SPEC2-gate-status-sensor.md`, revised in place as decisions were made,
+so it now describes what was built rather than what was first asked for.
+
+A reed contact on the pillar, wired to a Shelly Plus Add-on, reporting on
+`input:100`. `GateStatePort` no longer resolves to `UnknownPositionStateAdapter`
+— that stays in the tree, unused, as the documented fallback.
+
+**`GatePosition` lost `'open'`.** It is `'closed' | 'not_closed' | 'unknown'`.
+The contact reports a magnet or no magnet, so a gate standing fully open, one
+stopped mid-travel, and one jammed on a leaf are the same reading. The rename
+touched one `as const` array: no production code anywhere branched on position.
+
+**Push is primary, poll is reconciliation.** `GET /webhooks/gate-state/:token/
+:reading` — GET, not POST, because Gen2 webhooks are plain fetches with no
+body, so the event rides in the path and each event registers its own URL. The
+route may only report state: its own token, no shared auth, no path into
+`TriggerGateUseCase`. A rejection answers exactly what an unknown path answers,
+since a lone 404 among this API's 400s would confirm the endpoint exists.
+
+The 60s poll corrects drift from webhooks that were never delivered — they are
+fire-and-forget — and establishes state after a restart, which a change-
+triggered webhook never can. It needs `select: ['status']`; without it the
+cloud answers a bare five-field summary with no components in it at all.
+
+Nothing is persisted. An earlier draft kept a durable row and then forced it to
+`unknown` on boot anyway, since the gate can be walked open by the physical
+remote while the backend is down — the row could only ever be overwritten
+before it was read.
+
+### Three bugs found by looking at the running thing
+
+- **`waitForSlot` slept once**, and `setTimeout` fires early against
+  `Date.now()` on Windows, so the promised 1s Shelly gap was routinely 998ms.
+  A live probe answered `TOO_MANY_REQUESTS`. Now a loop.
+- **`getState()` gated position on staleness alone**, so for the whole stale
+  window after contact was lost it kept answering with a confident position
+  beside `reachable: false`.
+- **The poll recorded Shelly Cloud's CACHED status for an offline device**,
+  stamping a fresh `confirmedAt` on stale data every 60s — so a controller
+  dead for hours still reported a position and the staleness window never
+  fired at all. This one had a passing test asserting the old behaviour, which
+  is why the suite stayed green through both.
+
+### The app
+
+Position moved from a header line to the message strip, the biggest element on
+the screen, because the real usage is a glance from a car already moving.
+`StatusPanel` went back to controller reachability only.
+
+**`not_closed` renders as OPEN.** A deliberate, informed inaccuracy, decided by
+the owner after the tradeoff was put to him: it overstates what is known in two
+of three cases, but the question actually being asked is "do I need to turn
+around", both cases answer it the same, and a driver does not reliably parse a
+negation at arm's length. Confined to one rendering function; the wire format,
+domain and audit trail all still say `not_closed`.
+
+An unconfirmed reading greys under a `LAST SEEN` label rather than collapsing
+to a bare UNKNOWN. The strip holds a fixed 92 — sized for a three-line message,
+the tallest thing it ever shows — so nothing moves as a result message comes
+and goes and the button never hops under a thumb. Every line height in it is
+explicit so that arithmetic is checkable rather than a guess.
+
+While the position is unknown the screen re-asks every 3s until it resolves,
+because the refresh fired straight after a tap can only ever read `unknown`.
+
+### What is verified, and what is not
+
+Verified against the real device on a local backend: component id, polarity
+(`state: false` = not closed, so `REED_LOGIC_INVERTED=false`), the poll reading
+the contact, staleness crossing its boundary, and the webhook route — valid
+token, a rejection byte-identical to an unknown path, and the token redacted
+out of the request log.
+
+**Not verified: the push path.** `sys.webhook_rev` is 0, no webhook has ever
+arrived, and the device could not reach a laptop backend anyway. Sub-second
+updates and the auto-resolving UNKNOWN→CLOSED after a tap are tested but not
+proven on hardware. That needs the deploy.
+
+### Deploying this
+
+Backend and app must ship together: `GateStatusResponseSchema` gained a
+required `lastReading`, so the new app rejects the old backend's response.
+
+The server's `.env` needs `SHELLY_INPUT_COMPONENT_ID=100` and a fresh
+`GATE_STATE_WEBHOOK_TOKEN` (`openssl rand -hex 32` — hex, not base64, since it
+travels in a URL path) BEFORE the restart. Both are required with no default,
+so a pull-and-restart without them leaves the service down rather than
+degraded.
+
+Then register both webhooks on the device and confirm `webhook_rev` moves off
+0. Caddy's access log needs the URI filter from `docs/DEPLOY.md` first — the
+backend scrubs the token from its own log, the proxy does not.
 
 ## Deviations from SPEC.md
 

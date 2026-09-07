@@ -72,16 +72,24 @@ const BANNER_MIN_HEIGHT = 92;
 const MESSAGE_LINE_HEIGHT = 20;
 
 /**
- * The position's own type, sized so the strip is the SAME height whether it
- * holds a position or a result message. `typography.hero` overflowed the
- * reserved space once a "LAST SEEN" label sat above it, and the strip growing
- * as a message came and went made the button hop.
+ * The position's own type. `typography.hero`'s size, since this is the one
+ * thing on the screen that has to be read from a car, but with an explicit
+ * line height -- the strip must be the SAME height whether it holds a
+ * position or a result message, or the button hops as one replaces the other.
  *
  * Line heights are explicit rather than left to the platform's ~1.2x guess,
- * because the whole point is that the arithmetic lands predictably:
- * 14 label + 2 gap + 32 word + 32 padding = 80, inside the reserved height.
+ * because the whole point is that the arithmetic lands predictably. The
+ * binding case is the labelled one, not the bare word:
+ *
+ *   14 label + 2 gap + 38 word = 54, inside the 60 the box leaves after
+ *   its 32 of padding. 6 to spare.
+ *
+ * Do not raise this without redoing that sum. Past about 38 the sum stops
+ * fitting, and `CHECKING...` -- the longest string here, at eleven
+ * characters -- starts risking a wrap on a 360dp screen, which costs a whole
+ * second line and brings the hop straight back.
  */
-const POSITION_TYPE = { fontSize: 28, fontWeight: '800' as const, lineHeight: 32 };
+const POSITION_TYPE = { fontSize: 34, fontWeight: '800' as const, lineHeight: 38 };
 const POSITION_LABEL_TYPE = { fontSize: 12, fontWeight: '600' as const, lineHeight: 14 };
 const POSITION_LABEL_GAP = 2;
 

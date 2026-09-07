@@ -122,6 +122,18 @@ liveness.
   lost and that's worth knowing.
 - Respect the existing 1 req/s Shelly rate limit.
 
+Plus **one direct read 20 seconds after a pulse**. The interval alone runs
+from server boot and bears no relation to when anyone pressed the button, so
+a dropped webhook could leave the app wrong for up to a minute at exactly
+the moment someone is looking at it. Twenty seconds clears the gate's travel
+-- about 12s to close, and the magnet clears roughly 3.8s into an opening.
+
+**Do not read earlier than travel takes.** During the first seconds of an
+opening the contact truthfully still reports `closed`, so an early read puts
+a confident CLOSED under a gate that is already swinging open -- wrong in
+the exact direction that gets someone driving away. Later and useless beats
+earlier and misleading.
+
 Do not poll faster to compensate for webhook problems. Fix the webhooks.
 
 **Verify the response shape before writing the parser.** The current state

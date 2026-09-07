@@ -5,6 +5,17 @@ import { readInput, type ReedSwitchStateAdapter } from './reed-switch-state-adap
 
 export interface PollOptions {
   intervalMs: number;
+  /**
+   * How long after a pulse to take one direct read.
+   *
+   * Long enough that the gate has finished travelling: measured on the real
+   * gate, closing takes about 12s and the magnet clears roughly 3.8s into an
+   * opening. Reading earlier than that is worse than not reading -- during
+   * the first seconds of an opening the contact truthfully still reports
+   * `closed`, and recording it would put a confident CLOSED on screen under a
+   * gate that is already swinging open.
+   */
+  settleAfterMs: number;
   inputComponentId: number;
   reedLogicInverted: boolean;
 }
@@ -85,6 +96,12 @@ export function readContact(
  * staleness window means five consecutive failures before the app is told we
  * have stopped knowing.
  *
+ * It also takes one read shortly after each pulse, subscribing to the
+ * adapter's `onMoving`. The interval alone runs from server boot and has no
+ * relationship to when anyone presses the button, so a dropped webhook could
+ * otherwise leave the app wrong for up to a minute at exactly the moment
+ * someone is looking -- driving away, wanting to know the gate shut.
+ *
  * Returns a stop function. Started from server.ts rather than the composition
  * root so that building a container in a test does not open a socket to
  * Shelly.
@@ -145,5 +162,31 @@ export function startGateStatePoll(
   const timer = setInterval(run, options.intervalMs);
   timer.unref();
 
-  return () => clearInterval(timer);
+  // Last tap wins. A second pulse inside the window means travel restarted,
+  // so the old deadline is meaningless -- and a burst of taps should cost one
+  // read rather than one per tap.
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelSettle = (): void => {
+    if (settleTimer !== null) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+  };
+
+  adapter.onMoving = () => {
+    cancelSettle();
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      run();
+    }, options.settleAfterMs);
+    settleTimer.unref();
+  };
+
+  return () => {
+    clearInterval(timer);
+    cancelSettle();
+    // Unsubscribe as well: a pulse arriving after shutdown must not wake a
+    // poll that is meant to be stopped.
+    delete adapter.onMoving;
+  };
 }

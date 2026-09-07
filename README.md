@@ -503,8 +503,9 @@ cannot move a gate — but it is still a secret and rotating it means re-running
 `Webhook.Create`.
 
 Webhooks are fire-and-forget: no retries, no queue, no delivery guarantee. A
-missed one is corrected by the 60-second reconciliation poll, which is the only
-reason that poll exists. If corrections show up in the log regularly, fix the
+missed one is corrected by the reconciliation poll -- every 60 seconds, and
+once 20 seconds after each pulse, which is when a lost event matters most and
+when the gate has just finished travelling. If corrections show up in the log regularly, fix the
 webhooks rather than polling faster.
 
 ### Failures

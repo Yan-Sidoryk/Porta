@@ -62,12 +62,23 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
     if (source === 'webhook') this.online = true;
   }
 
+  /**
+   * Set by the reconciliation poll, which owns the only Shelly connection.
+   *
+   * This adapter deliberately never calls Shelly -- answering from memory is
+   * the whole reason it exists -- so it cannot go and look for itself. It
+   * just says "the gate is moving" and lets whoever can read the device
+   * decide what to do about it.
+   */
+  onMoving?: () => void;
+
   markUnknown(): void {
     // `confirmedAt` is deliberately NOT advanced: a pulse we sent is not
     // evidence that anyone read the contact. Clearing the reading is enough
     // to make getState() answer 'unknown' until a webhook or poll resolves it.
     this.reading = null;
     this.source = null;
+    this.onMoving?.();
   }
 
   /**

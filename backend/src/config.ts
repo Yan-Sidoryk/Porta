@@ -34,6 +34,13 @@ const EnvSchema = z.object({
   GATE_STATE_STALE_AFTER_MS: z.coerce.number().int().positive().default(300_000),
   GATE_STATE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
+  // One direct read this long after a pulse, so a dropped webhook is
+  // corrected in seconds rather than whenever the interval next happens to
+  // come round. Must be longer than the gate takes to travel -- see
+  // PollOptions.settleAfterMs for why reading early is worse than not
+  // reading at all.
+  GATE_STATE_SETTLE_AFTER_MS: z.coerce.number().int().positive().default(20_000),
+
   // The first boolean in this config. An enum rather than a truthiness check
   // so that REED_LOGIC_INVERTED=ture is a refusal to boot instead of a gate
   // that silently reports backwards.
@@ -55,6 +62,7 @@ export interface Config {
     inputComponentId: number;
     staleAfterMs: number;
     pollIntervalMs: number;
+    settleAfterMs: number;
     reedLogicInverted: boolean;
   };
 }
@@ -107,6 +115,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       inputComponentId: values.SHELLY_INPUT_COMPONENT_ID,
       staleAfterMs: values.GATE_STATE_STALE_AFTER_MS,
       pollIntervalMs: values.GATE_STATE_POLL_INTERVAL_MS,
+      settleAfterMs: values.GATE_STATE_SETTLE_AFTER_MS,
       reedLogicInverted: values.REED_LOGIC_INVERTED,
     },
   };

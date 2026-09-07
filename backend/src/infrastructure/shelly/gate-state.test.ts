@@ -47,8 +47,22 @@ const config = (host: string) => ({
   host, authKey: 'test-key-not-real', deviceId: 'testdevice', timeoutMs: 5000, insecure: true,
 });
 
-const options = { intervalMs: 3_600_000, inputComponentId: 100, reedLogicInverted: false };
+// The interval is parked out of reach so each test drives its own reads.
+const SETTLE_MS = 150;
+const options = {
+  intervalMs: 3_600_000, settleAfterMs: SETTLE_MS,
+  inputComponentId: 100, reedLogicInverted: false,
+};
 const silent = { warn: () => {} };
+
+/**
+ * A flat wait, for proving something does NOT happen. Longer than the settle
+ * delay plus the client's process-wide one-second Shelly gap, so a wrongly
+ * stacked or uncancelled timer has time to turn into a request and be seen.
+ */
+const QUIET_MS = 1600;
+const pause = (ms: number): Promise<void> =>
+  new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /**
  * Waits for the first tick to land rather than sleeping a fixed span: every
@@ -281,4 +295,98 @@ describe('reconciliation poll', () => {
     expect(state.position).toBe('unknown');
     expect(state.lastReading).toBeNull();
   });
+});
+
+describe('settle read after a pulse', () => {
+  it('takes one direct read once the gate has finished travelling', async () => {
+    // The webhook that never arrived: a gate that actually closed, with a
+    // store still holding the reading from before the pulse.
+    const { host } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(async () => (await adapter.getState()).position === 'closed');
+
+    // A pulse: the gate is moving, so the stored position is dropped.
+    adapter.markUnknown();
+    expect((await adapter.getState()).position).toBe('unknown');
+
+    // Without the settle read this would wait out the whole interval, which
+    // runs from server boot and has nothing to do with when anyone tapped.
+    await settle(async () => (await adapter.getState()).position === 'closed');
+    stop();
+
+    expect((await adapter.getState()).position).toBe('closed');
+  }, 20_000);
+
+  it('costs one read for a burst of taps, timed from the last', async () => {
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+    const afterStartup = count();
+
+    // Three taps in quick succession. Travel restarts on each, so the earlier
+    // deadlines are meaningless and must not each buy their own request.
+    adapter.markUnknown();
+    adapter.markUnknown();
+    adapter.markUnknown();
+
+    await settle(() => count() > afterStartup);
+    await pause(QUIET_MS);
+    stop();
+
+    expect(count() - afterStartup).toBe(1);
+  }, 20_000);
+
+  it('does not fire into a poll that has been stopped', async () => {
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(1, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+
+    adapter.markUnknown();
+    stop();
+    const atStop = count();
+
+    await pause(QUIET_MS);
+    expect(count()).toBe(atStop);
+
+    // And a pulse arriving after shutdown wakes nothing at all.
+    adapter.markUnknown();
+    await pause(QUIET_MS);
+    expect(count()).toBe(atStop);
+  }, 20_000);
+
+  it('reuses the offline guard rather than trusting a cached read', async () => {
+    // Same rule as the interval: an offline device is served from Shelly's
+    // cache, and recording it would stamp fresh confirmedAt on stale data.
+    const { host, count } = await start(() => ({
+      status: 200, json: deviceReply(0, { id: 100, state: true }),
+    }));
+    const clock = new FakeClock();
+    const adapter = new ReedSwitchStateAdapter(clock, STALE_AFTER_MS);
+
+    const stop = startGateStatePoll(adapter, config(host), clock, options, silent);
+    await settle(() => count() > 0);
+    const afterStartup = count();
+
+    adapter.markUnknown();
+    await settle(() => count() > afterStartup);
+    stop();
+
+    expect(adapter.lastPosition()).toBeNull();
+    expect((await adapter.getState()).position).toBe('unknown');
+  }, 20_000);
 });

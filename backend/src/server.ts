@@ -73,6 +73,7 @@ const stopPoll = startGateStatePoll(
   container.clock,
   {
     intervalMs: config.gateState.pollIntervalMs,
+    settleAfterMs: config.gateState.settleAfterMs,
     inputComponentId: config.gateState.inputComponentId,
     reedLogicInverted: config.gateState.reedLogicInverted,
   },

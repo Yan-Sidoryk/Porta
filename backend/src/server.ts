@@ -13,8 +13,22 @@ import { startGateStatePoll } from './infrastructure/shelly/gate-state-poll.js';
  * same treatment; see docs/DEPLOY.md.
  */
 const WEBHOOK_PREFIX = '/webhooks/gate-state/';
-const scrubUrl = (url: string): string =>
-  (url.startsWith(WEBHOOK_PREFIX) ? `${WEBHOOK_PREFIX}[redacted]` : url);
+
+/**
+ * Only the token segment is secret. The reading after it -- `closed` or
+ * `not-closed` -- is not, and blanking the whole path made a rejected webhook
+ * impossible to diagnose: a wrong token and a wrong reading both answer 400,
+ * deliberately and indistinguishably, so the log was the only thing left that
+ * could tell them apart and it was hiding both.
+ */
+const scrubUrl = (url: string): string => {
+  if (!url.startsWith(WEBHOOK_PREFIX)) return url;
+  const rest = url.slice(WEBHOOK_PREFIX.length);
+  const nextSlash = rest.indexOf('/');
+  return nextSlash === -1
+    ? `${WEBHOOK_PREFIX}[redacted]`
+    : `${WEBHOOK_PREFIX}[redacted]${rest.slice(nextSlash)}`;
+};
 
 // Throws before anything opens a socket if a secret is missing or production
 // is not behind https. Failing here is the point: not at 2am.

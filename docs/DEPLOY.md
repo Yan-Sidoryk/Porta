@@ -51,39 +51,115 @@ account with no shell, and the systemd unit gives it exactly one writable path.
 ## Push notifications (one-time setup)
 
 The backend sends the gate-left-open alert through Expo's push service, which
-relays to Firebase Cloud Messaging. **Expo needs an FCM key before anything is
-delivered.** Until it has one the backend still sends, Expo rejects, the alarm
-logs a warning and everything else carries on — so this is safe to leave
-undone, it just means no notifications arrive.
+relays to Firebase Cloud Messaging. **Nothing is delivered until Firebase is
+set up.** Until then the backend sends, Expo rejects, the alarm logs a warning
+and everything else carries on -- so this is safe to leave undone.
 
-It needs a Google account, so it cannot be scripted from here.
+It needs a Google login, so it cannot be scripted from here.
 
-1. **Firebase console** → create a project (or reuse one). The name does not
-   matter; nothing else in this system touches Firebase.
-2. **Project settings → Cloud Messaging** → enable the Firebase Cloud
-   Messaging API (V1) if it is not already on.
-3. **Project settings → Service accounts → Generate new private key.** This
-   downloads a JSON file. It is a credential: do not commit it.
-4. Upload it to Expo:
+### Two files, two different jobs
+
+Confusing them is the usual way this goes wrong:
+
+| File | Where it goes | What it is for |
+|---|---|---|
+| `google-services.json` | into the app build | lets the PHONE register with FCM and obtain a token |
+| service account key (JSON) | uploaded to Expo | lets EXPO'S SERVERS send to that token on your behalf |
+
+You need both. One without the other fails silently in a different way: no
+`google-services.json` and the app cannot get a token at all; no service
+account key and the token exists but nothing can push to it.
+
+### 1. Firebase project and the Android app
+
+1. <https://console.firebase.google.com> -> **Add project**. Any name. Google
+   Analytics can be disabled -- nothing here uses it.
+2. In the project, click the **Android** icon to add an app.
+3. **Android package name** must be exactly:
+
+   ```
+   com.yansidoryk.porta
+   ```
+
+   It has to match `expo.android.package` in `app/app.json`. A mismatch
+   registers fine and then never delivers.
+4. Nickname optional. **SHA-1 is not needed** for push; leave it blank.
+5. Download **`google-services.json`** and save it to `app/google-services.json`.
+6. Skip the remaining "add the SDK" steps -- Expo's build does that.
+
+Then point the build at it, in `app/app.json` under `expo.android`:
+
+```json
+"googleServicesFile": "./google-services.json"
+```
+
+The file is not a secret in the security sense -- a copy ships inside every
+APK you distribute, and Google documents checking it in. It carries a project
+id and a client API key, not a credential.
+
+### 2. Enable the v1 API
+
+**Project settings** (gear, top left) -> **Cloud Messaging** tab. Confirm
+**Firebase Cloud Messaging API (V1)** shows *Enabled*. If it does not, the
+page links to the Google Cloud console to switch it on. The old legacy server
+key is retired and is not what Expo uses.
+
+### 3. Service account key, uploaded to Expo
+
+1. **Project settings** -> **Service accounts** tab -> **Generate new private
+   key**. A JSON file downloads. **This one IS a credential** -- it can send
+   push as your project. Do not commit it.
+2. Upload it:
 
    ```bash
    cd app && npx eas-cli credentials
    ```
 
-   Choose Android → the build profile → *Google Service Account* → *Manage your
-   Google Service Account Key for Push Notifications* → upload the JSON.
-5. Delete the downloaded JSON afterwards. Expo holds it now.
+   Android -> the build profile -> **Google Service Account** -> *Manage your
+   Google Service Account Key for Push Notifications* -> upload the JSON.
+3. Delete the downloaded file. Expo holds it now.
 
-Verify by setting `GATE_OPEN_ALERT_AFTER_MS=60000` in `/opt/porta/.env`,
-restarting, and leaving the gate open for a minute. Restore `300000` after.
+### 4. Build and test
+
+Expo Go cannot receive remote push on Android, so this needs a real build.
+The development profile keeps hot reload:
+
+```bash
+npx eas-cli build --profile development --platform android
+```
+
+Install it, sign in, and turn on **Notify if left open** in the app's settings
+menu. Then shorten the window on the server to make the test quick:
+
+```bash
+sudo sed -i 's/^GATE_OPEN_ALERT_AFTER_MS=.*/GATE_OPEN_ALERT_AFTER_MS=60000/' /opt/porta/.env
+sudo systemctl restart porta
+```
+
+Leave the gate open a minute: one notification, and no second one however long
+it stays open. Close and reopen it for exactly one more. Then put it back:
+
+```bash
+sudo sed -i 's/^GATE_OPEN_ALERT_AFTER_MS=.*/GATE_OPEN_ALERT_AFTER_MS=300000/' /opt/porta/.env
+sudo systemctl restart porta
+```
 
 **Who gets the alert** is decided at send time by the same rule that decides
 who may open the gate, so revoking a guest's grant also stops their
-notifications, and a disabled account stops immediately.
+notifications and a disabled account stops immediately.
 
-**Testing needs a real build.** Expo Go cannot receive remote push on Android.
-Build the development client once — `npx eas-cli build --profile development
---platform android` — and it keeps hot reload while supporting push.
+### When nothing arrives
+
+```bash
+sudo journalctl -u porta --since "-1h" -o cat | grep -i expo
+```
+
+`expo push ticket failed` with a `MismatchSenderId` means the
+`google-services.json` in the build belongs to a different Firebase project
+than the service account key. `InvalidCredentials` means the key was not
+accepted -- re-run `eas credentials`. Silence in the log with no ticket errors
+means the alarm never fired, which is a gate-state question rather than a push
+one.
 
 ---
 

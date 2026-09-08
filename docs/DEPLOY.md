@@ -93,9 +93,24 @@ Then point the build at it, in `app/app.json` under `expo.android`:
 "googleServicesFile": "./google-services.json"
 ```
 
-The file is not a secret in the security sense -- a copy ships inside every
-APK you distribute, and Google documents checking it in. It carries a project
-id and a client API key, not a credential.
+`google-services.json` is committed. A copy ships inside every APK anyway and
+Google documents checking it in -- it carries a project id and a client API
+key, not a credential, and it cannot send push.
+
+**This repository is PUBLIC, so that key must stay restricted.** Committing it
+is only safe because of that; an unrestricted `AIzaSy...` key in a public repo
+is scraped by bots within hours. In the Google Cloud console, under
+*APIs & Services -> Credentials*, the auto-created Android key must have:
+
+- **Application restrictions**: Android apps, package `com.yansidoryk.porta`
+  plus the signing SHA-1 (shown by `npx eas-cli credentials` under the
+  Android keystore).
+- **API restrictions**: Firebase Cloud Messaging API and Firebase
+  Installations API only.
+
+If the key is ever regenerated, re-apply both. Rewriting git history does not
+un-leak a key that has already been public -- restricting it is the mitigation,
+and rotation is the only thing that kills an old value outright.
 
 ### 2. Enable the v1 API
 

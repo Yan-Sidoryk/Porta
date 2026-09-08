@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "autoIncrement": "versionCode"
       },
       "env": {
         "GATE_API_URL": "https://porta-app.duckdns.org"

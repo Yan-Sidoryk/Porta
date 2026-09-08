@@ -5,8 +5,13 @@ dist/
 *.sqlite
 .expo/
 
-# Firebase service account keys. `google-services.json` is deliberately NOT
-# here: it is client config that ships inside every APK anyway, and the build
-# needs it. An *-adminsdk-* key is the opposite -- it can send push as the
-# whole project, and belongs only in Expo's credential store.
+# Firebase. Neither of these belongs in a PUBLIC repository.
+#
+# The *-adminsdk-* key can send push as the whole project and lives only in
+# Expo's credential store. google-services.json is not a credential -- a copy
+# ships inside every APK -- but an `AIzaSy...` key visible in a public repo
+# reads as a mistake whatever the restrictions say, so EAS holds it as the
+# file secret GOOGLE_SERVICES_JSON and app.config.js reads the path from
+# there. Keep a local copy beside app.json for local builds.
 *-firebase-adminsdk-*.json
+app/google-services.json

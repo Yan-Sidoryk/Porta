@@ -93,24 +93,33 @@ Then point the build at it, in `app/app.json` under `expo.android`:
 "googleServicesFile": "./google-services.json"
 ```
 
-`google-services.json` is committed. A copy ships inside every APK anyway and
-Google documents checking it in -- it carries a project id and a client API
-key, not a credential, and it cannot send push.
+`google-services.json` is **not** committed. It is not a credential -- a copy
+ships inside every APK -- but this repository is public, and an `AIzaSy...`
+key sitting in a JSON file reads as a mistake to anyone browsing it whatever
+the key's restrictions actually say.
 
-**This repository is PUBLIC, so that key must stay restricted.** Committing it
-is only safe because of that; an unrestricted `AIzaSy...` key in a public repo
-is scraped by bots within hours. In the Google Cloud console, under
-*APIs & Services -> Credentials*, the auto-created Android key must have:
+EAS holds it as the file secret `GOOGLE_SERVICES_JSON`, and `app.config.js`
+reads the path from there, falling back to a local untracked copy:
 
-- **Application restrictions**: Android apps, package `com.yansidoryk.porta`
-  plus the signing SHA-1 (shown by `npx eas-cli credentials` under the
-  Android keystore).
-- **API restrictions**: Firebase Cloud Messaging API and Firebase
-  Installations API only.
+```bash
+cd app && npx eas-cli env:set --name GOOGLE_SERVICES_JSON --type file   --value ./google-services.json --visibility sensitive   --environment development --environment preview
+```
 
-If the key is ever regenerated, re-apply both. Rewriting git history does not
-un-leak a key that has already been public -- restricting it is the mitigation,
-and rotation is the only thing that kills an old value outright.
+Keep your own copy at `app/google-services.json`; it is gitignored. A fresh
+clone needs it re-downloaded from Firebase, or pulled with `eas env:pull`.
+
+**Restrict the API key regardless.** In the Google Cloud console under
+*APIs & Services -> Credentials*, the auto-created Android key should have
+Application restrictions set to Android apps with package
+`com.yansidoryk.porta` plus the signing SHA-1 (shown on the Expo dashboard
+under the project's Android keystore), and API restrictions limited to
+Firebase Cloud Messaging and Firebase Installations. That restriction, not
+where the file lives, is what makes the key useless to anyone else -- it
+cannot be used without the signing certificate, which never leaves Expo.
+
+An earlier revision of this repository did commit the file. Rewriting history
+would not un-leak it, so the key was restricted instead; restriction is the
+mitigation, rotation is the only thing that kills an old value outright.
 
 ### 2. Enable the v1 API
 

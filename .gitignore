@@ -4,3 +4,9 @@ dist/
 *.db*
 *.sqlite
 .expo/
+
+# Firebase service account keys. `google-services.json` is deliberately NOT
+# here: it is client config that ships inside every APK anyway, and the build
+# needs it. An *-adminsdk-* key is the opposite -- it can send push as the
+# whole project, and belongs only in Expo's credential store.
+*-firebase-adminsdk-*.json

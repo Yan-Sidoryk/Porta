@@ -11,6 +11,7 @@
     },
     "android": {
       "package": "com.yansidoryk.porta",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#EA971F"

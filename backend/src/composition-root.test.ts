@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildContainer, type Container } from './composition-root.js';
 import { loadConfig } from './config.js';
+import { FakePushSender } from '../test/fakes.js';
 import type { Redactor } from './application/audited-trigger.js';
 
 const config = loadConfig({
@@ -18,7 +19,7 @@ const config = loadConfig({
 
 let container: Container | null = null;
 const build = (): Container => {
-  container = buildContainer(config);
+  container = buildContainer(config, new FakePushSender());
   return container;
 };
 

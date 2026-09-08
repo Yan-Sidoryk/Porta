@@ -46,6 +46,10 @@ const EnvSchema = z.object({
   // end up queued behind them.
   GATE_STATE_REFRESH_MIN_GAP_MS: z.coerce.number().int().positive().default(10_000),
 
+  // How long the gate may stand open before everyone entitled to know is
+  // told. Once per opening: another needs a confirmed close first.
+  GATE_OPEN_ALERT_AFTER_MS: z.coerce.number().int().positive().default(300_000),
+
   // The first boolean in this config. An enum rather than a truthiness check
   // so that REED_LOGIC_INVERTED=ture is a refusal to boot instead of a gate
   // that silently reports backwards.
@@ -69,6 +73,7 @@ export interface Config {
     pollIntervalMs: number;
     settleAfterMs: number;
     refreshMinGapMs: number;
+    openAlertAfterMs: number;
     reedLogicInverted: boolean;
   };
 }
@@ -123,6 +128,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       pollIntervalMs: values.GATE_STATE_POLL_INTERVAL_MS,
       settleAfterMs: values.GATE_STATE_SETTLE_AFTER_MS,
       refreshMinGapMs: values.GATE_STATE_REFRESH_MIN_GAP_MS,
+      openAlertAfterMs: values.GATE_OPEN_ALERT_AFTER_MS,
       reedLogicInverted: values.REED_LOGIC_INVERTED,
     },
   };

@@ -23,6 +23,13 @@
     "plugins": [
       "expo-secure-store",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/logo.png",
+          "color": "#EA971F"
+        }
+      ],
+      [
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow Porta to use Face ID to unlock the app."

@@ -60,6 +60,8 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
     // failing while pushes still arrive would report 'unknown' on data that
     // had just been delivered first-hand.
     if (source === 'webhook') this.online = true;
+
+    this.onReading?.(position);
   }
 
   /**
@@ -82,6 +84,14 @@ export class ReedSwitchStateAdapter implements GateStatePort, GateStateSinkPort 
    * never opens a socket.
    */
   readNow?: () => Promise<void>;
+
+  /**
+   * Every reading as it is recorded, raw -- before the staleness cut, and
+   * whichever of the webhook or the poll produced it. Set by the gate-open
+   * alarm, which needs the transitions rather than the answer `getState()`
+   * gives.
+   */
+  onReading?: (position: GatePosition) => void;
 
   markUnknown(): void {
     // `confirmedAt` is deliberately NOT advanced: a pulse we sent is not

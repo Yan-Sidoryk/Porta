@@ -1,6 +1,7 @@
 import type {
   AccessGrantRepositoryPort, AuditEntry, AuditLogPort, ClockPort,
   CommandGuardPort, GateCommandPort, GateStatePort, GateStateSinkPort,
+  PushSenderPort, PushToken, PushTokenRepositoryPort,
   TokenServicePort, UserRepositoryPort,
 } from '../src/domain/ports.js';
 import type {
@@ -148,6 +149,28 @@ export class FakeGrantRepo implements AccessGrantRepositoryPort {
   async revoke(id: string, at: Date): Promise<void> {
     const g = this.grants.find((x) => x.id === id);
     if (g) g.revokedAt = at;
+  }
+}
+
+export class FakePushTokens implements PushTokenRepositoryPort {
+  constructor(public tokens: PushToken[] = []) {}
+  async save(t: PushToken): Promise<void> {
+    this.tokens = [...this.tokens.filter((x) => x.token !== t.token), t];
+  }
+  async listAll(): Promise<PushToken[]> { return [...this.tokens]; }
+  async remove(token: string): Promise<void> {
+    this.tokens = this.tokens.filter((x) => x.token !== token);
+  }
+}
+
+export class FakePushSender implements PushSenderPort {
+  /** Every send, so a test can assert both who was told and how often. */
+  readonly sent: { tokens: string[]; title: string }[] = [];
+  /** Tokens to report back as permanently dead, e.g. an uninstalled app. */
+  constructor(private dead: string[] = []) {}
+  async send(tokens: string[], message: { title: string; body: string }): Promise<string[]> {
+    this.sent.push({ tokens, title: message.title });
+    return this.dead.filter((d) => tokens.includes(d));
   }
 }
 

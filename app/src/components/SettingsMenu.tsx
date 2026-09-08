@@ -10,6 +10,10 @@ interface Props {
   /** Measured height of the header row. See where blurTop is derived below. */
   headerHeight: number;
   biometricOn: boolean;
+  notifyOn: boolean;
+  /** Why the switch cannot be turned on -- Expo Go, or permission refused. */
+  notifyBlockedReason: string | null;
+  onToggleNotify: (next: boolean) => void;
   /** Why the toggle is unavailable, shown under it. */
   biometricBlockedReason: string | null;
   busy: boolean;
@@ -28,6 +32,7 @@ interface Props {
  */
 export function SettingsMenu({
   visible, onClose, headerHeight, biometricOn, biometricBlockedReason,
+  notifyOn, notifyBlockedReason, onToggleNotify,
   busy, onToggleBiometric, use24h, onToggle24h, onSignOut,
 }: Props) {
   /**
@@ -105,6 +110,22 @@ export function SettingsMenu({
               {biometricBlockedReason ? (
                 <Text style={{ ...typography.small, color: colors.warn }}>
                   {biometricBlockedReason}
+                </Text>
+              ) : null}
+
+              <View style={{ height: 1, backgroundColor: colors.border }} />
+
+              <Row
+                title="Notify if left open"
+                subtitle="When the gate stays open for a few minutes"
+                value={notifyOn}
+                disabled={busy || notifyBlockedReason !== null}
+                onValueChange={onToggleNotify}
+              />
+
+              {notifyBlockedReason ? (
+                <Text style={{ ...typography.small, color: colors.warn }}>
+                  {notifyBlockedReason}
                 </Text>
               ) : null}
 

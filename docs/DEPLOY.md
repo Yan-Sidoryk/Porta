@@ -48,6 +48,45 @@ account with no shell, and the systemd unit gives it exactly one writable path.
 
 ---
 
+## Push notifications (one-time setup)
+
+The backend sends the gate-left-open alert through Expo's push service, which
+relays to Firebase Cloud Messaging. **Expo needs an FCM key before anything is
+delivered.** Until it has one the backend still sends, Expo rejects, the alarm
+logs a warning and everything else carries on — so this is safe to leave
+undone, it just means no notifications arrive.
+
+It needs a Google account, so it cannot be scripted from here.
+
+1. **Firebase console** → create a project (or reuse one). The name does not
+   matter; nothing else in this system touches Firebase.
+2. **Project settings → Cloud Messaging** → enable the Firebase Cloud
+   Messaging API (V1) if it is not already on.
+3. **Project settings → Service accounts → Generate new private key.** This
+   downloads a JSON file. It is a credential: do not commit it.
+4. Upload it to Expo:
+
+   ```bash
+   cd app && npx eas-cli credentials
+   ```
+
+   Choose Android → the build profile → *Google Service Account* → *Manage your
+   Google Service Account Key for Push Notifications* → upload the JSON.
+5. Delete the downloaded JSON afterwards. Expo holds it now.
+
+Verify by setting `GATE_OPEN_ALERT_AFTER_MS=60000` in `/opt/porta/.env`,
+restarting, and leaving the gate open for a minute. Restore `300000` after.
+
+**Who gets the alert** is decided at send time by the same rule that decides
+who may open the gate, so revoking a guest's grant also stops their
+notifications, and a disabled account stops immediately.
+
+**Testing needs a real build.** Expo Go cannot receive remote push on Android.
+Build the development client once — `npx eas-cli build --profile development
+--platform android` — and it keeps hot reload while supporting push.
+
+---
+
 ## Redeploying a change
 
 ```bash

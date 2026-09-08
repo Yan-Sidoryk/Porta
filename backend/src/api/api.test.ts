@@ -7,12 +7,13 @@ import { TriggerGateUseCase } from '../application/trigger-gate.js';
 import { AuthenticateUserUseCase, RefreshSessionUseCase } from '../application/auth.js';
 import { IssueAccessGrantUseCase, RevokeAccessGrantUseCase } from '../application/access-grants.js';
 import { GetGateStatusUseCase, ListAuditEventsUseCase } from '../application/queries.js';
+import { NotifyGateOpenUseCase } from '../application/notify-gate-open.js';
 import { RoleBasedAccessPolicy } from '../domain/access-policy.js';
 import { InMemoryRateLimiter } from '../infrastructure/rate-limiter.js';
 import { redact } from '../infrastructure/redact.js';
 import {
   FakeAuditLog, FakeClock, FakeGateCommand, FakeGateState, FakeGrantRepo,
-  FakeGuard, FakeTokenService, FakeUserRepo,
+  FakeGuard, FakePushSender, FakePushTokens, FakeTokenService, FakeUserRepo,
 } from '../../test/fakes.js';
 import type { User } from '../domain/user.js';
 import { AUTH_RATE_LIMIT } from './routes/auth.js';
@@ -42,6 +43,8 @@ let gate: FakeGateCommand;
 let gateState: FakeGateState;
 let tokens: FakeTokenService;
 let audit: FakeAuditLog;
+let pushTokens: FakePushTokens;
+let pushSender: FakePushSender;
 
 let container: Container;
 
@@ -51,6 +54,9 @@ const setup = (): void => {
   gateState = new FakeGateState();
   tokens = new FakeTokenService();
   audit = new FakeAuditLog();
+
+  pushTokens = new FakePushTokens();
+  pushSender = new FakePushSender();
 
   const users = new FakeUserRepo([owner, guest]);
   const grants = new FakeGrantRepo();
@@ -69,6 +75,10 @@ const setup = (): void => {
     issueGrant: new IssueAccessGrantUseCase(users, grants),
     revokeGrant: new RevokeAccessGrantUseCase(users, grants, clock),
     tokens,
+    pushTokens,
+    notifyGateOpen: new NotifyGateOpenUseCase(
+      pushTokens, users, grants, new RoleBasedAccessPolicy(), pushSender, clock,
+    ),
     limiter: new InMemoryRateLimiter(clock),
     clock,
     gateStateSink: gateState,

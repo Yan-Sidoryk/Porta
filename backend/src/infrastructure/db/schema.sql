@@ -58,3 +58,14 @@ CREATE TABLE IF NOT EXISTS command_claims (
 CREATE INDEX IF NOT EXISTS idx_claims_claimed ON command_claims(claimed_at);
 CREATE INDEX IF NOT EXISTS idx_claims_key ON command_claims(idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_claims_cooling ON command_claims(cooling_until);
+
+-- One row per device that asked to be told when the gate is left open. The
+-- token is the primary key so re-registering the same device is an upsert
+-- rather than a duplicate; a phone that reinstalls simply gets a new one, and
+-- the old is deleted when Expo reports it as DeviceNotRegistered.
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_tokens(user_id);

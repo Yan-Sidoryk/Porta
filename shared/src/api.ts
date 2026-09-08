@@ -59,6 +59,15 @@ export const ErrorResponseSchema = z.object({
   retryAfterMs: z.number().int().nonnegative().optional(),
 });
 
+/**
+ * An Expo push token, `ExponentPushToken[...]`. Shape-checked rather than
+ * taken on trust: these are stored and later posted to Expo, and a typo or a
+ * junk value would sit in the table failing forever.
+ */
+export const PushTokenSchema = z.object({
+  token: z.string().regex(/^ExponentPushToken\[[^\]\s]+\]$/),
+});
+
 export const GateStatusResponseSchema = z.object({
   position: z.enum(GATE_POSITIONS),
   /**
@@ -105,6 +114,7 @@ export type IssueGrantRequest = z.infer<typeof IssueGrantRequestSchema>;
 export type IssueGrantResponse = z.infer<typeof IssueGrantResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type GateStatusResponse = z.infer<typeof GateStatusResponseSchema>;
+export type PushTokenRequest = z.infer<typeof PushTokenSchema>;
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 export type AuditListResponse = z.infer<typeof AuditListResponseSchema>;
 

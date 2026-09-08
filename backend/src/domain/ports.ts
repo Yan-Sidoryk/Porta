@@ -76,6 +76,27 @@ export interface TokenServicePort {
   revokeRefreshTokensFor(userId: string): Promise<void>;
 }
 
+export interface PushToken {
+  token: string;
+  userId: string;
+}
+
+export interface PushTokenRepositoryPort {
+  /** Re-registering the same token is an upsert, not a duplicate row. */
+  save(token: PushToken, at: Date): Promise<void>;
+  listAll(): Promise<PushToken[]>;
+  remove(token: string): Promise<void>;
+}
+
+export interface PushSenderPort {
+  /**
+   * Returns the tokens the service rejected as permanently dead -- an
+   * uninstalled app, mostly. The caller deletes them; without that they
+   * accumulate in the table and are retried forever.
+   */
+  send(tokens: string[], message: { title: string; body: string }): Promise<string[]>;
+}
+
 export interface ClockPort {
   now(): Date;
 }

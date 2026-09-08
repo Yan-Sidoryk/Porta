@@ -17,6 +17,7 @@ import { SettingsMenu } from '../components/SettingsMenu';
 import {
   authenticate, checkAvailability, isLockEnabled, setLockEnabled, type Availability,
 } from '../biometrics';
+import * as notifications from '../notifications';
 import { getUse24h, setUse24h } from '../settings';
 import { colors, screenTopPadding, space, type as typography } from '../theme';
 
@@ -164,11 +165,43 @@ export function GateScreen({ onSignedOut }: Props) {
 
   const [use24h, setUse24hState] = useState(true);
 
+  const [notifyOn, setNotifyOn] = useState(false);
+  /** Non-null while the switch cannot be turned on, and says why. */
+  const [notifyBlocked, setNotifyBlocked] = useState<string | null>(null);
+
+  /**
+   * Turning it on can fail in ways worth explaining -- Expo Go cannot receive
+   * push at all, and a permission refused once is never re-prompted by
+   * Android. So the switch only moves if the whole chain succeeded, rather
+   * than sitting on for a setting that does nothing.
+   */
+  const toggleNotify = async (next: boolean): Promise<void> => {
+    setTogglingLock(true);
+    try {
+      if (!next) {
+        await notifications.disable();
+        setNotifyOn(false);
+        setNotifyBlocked(null);
+        return;
+      }
+
+      const result = await notifications.enable();
+      setNotifyOn(result.available);
+      setNotifyBlocked(result.available ? null : result.reason);
+    } finally {
+      setTogglingLock(false);
+    }
+  };
+
   // Read once. Hardware and enrolment do not change while the app is open.
   useEffect(() => {
     void checkAvailability().then(setAvailability);
     void isLockEnabled().then(setBiometricOn);
     void getUse24h().then(setUse24hState);
+    void notifications.isEnabled().then(setNotifyOn);
+    void notifications.checkAvailability().then((result) => {
+      if (!result.available) setNotifyBlocked(result.reason);
+    });
   }, []);
 
   const toggle24h = (next: boolean): void => {
@@ -385,11 +418,20 @@ export function GateScreen({ onSignedOut }: Props) {
       biometricBlockedReason={availability && !availability.available ? availability.reason : null}
       busy={togglingLock}
       onToggleBiometric={(next) => { void toggleBiometric(next); }}
+      notifyOn={notifyOn}
+      notifyBlockedReason={notifyBlocked}
+      onToggleNotify={(next) => { void toggleNotify(next); }}
       use24h={use24h}
       onToggle24h={toggle24h}
       onSignOut={() => {
         setMenuOpen(false);
-        void logout().finally(onSignedOut);
+        // Unregister BEFORE logging out: the call needs the access token that
+        // logout is about to revoke. Otherwise a shared phone keeps alerting
+        // about a gate its previous user may no longer be allowed to open.
+        void notifications.disable()
+          .catch(() => {})
+          .then(() => logout())
+          .finally(onSignedOut);
       }}
     />
 

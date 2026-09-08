@@ -4,6 +4,16 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "GATE_API_URL": "https://porta-app.duckdns.org"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {

@@ -1,6 +1,7 @@
 import type { Config } from './config.js';
 import type {
-  ClockPort, GateCommandPort, GateStateSinkPort, RateLimiterPort, TokenServicePort,
+  ClockPort, GateCommandPort, GateStateSinkPort, PushSenderPort,
+  PushTokenRepositoryPort, RateLimiterPort, TokenServicePort,
 } from './domain/ports.js';
 import { RoleBasedAccessPolicy } from './domain/access-policy.js';
 import { AuditedTriggerGate } from './application/audited-trigger.js';
@@ -8,11 +9,13 @@ import { TriggerGateUseCase, type TriggerGate } from './application/trigger-gate
 import { AuthenticateUserUseCase, RefreshSessionUseCase } from './application/auth.js';
 import { IssueAccessGrantUseCase, RevokeAccessGrantUseCase } from './application/access-grants.js';
 import { GetGateStatusUseCase, ListAuditEventsUseCase } from './application/queries.js';
+import { NotifyGateOpenUseCase } from './application/notify-gate-open.js';
 import { openDatabase } from './infrastructure/db/open.js';
 import { SqliteUserRepository } from './infrastructure/db/user-repository.js';
 import { SqliteAccessGrantRepository } from './infrastructure/db/grant-repository.js';
 import { SqliteAuditLog } from './infrastructure/db/audit-log.js';
 import { SqliteCommandGuard } from './infrastructure/db/command-guard.js';
+import { SqlitePushTokenRepository } from './infrastructure/db/push-token-repository.js';
 import { ShellyCloudGateCommandAdapter } from './infrastructure/shelly/gate-command-adapter.js';
 import { ReedSwitchStateAdapter } from './infrastructure/shelly/reed-switch-state-adapter.js';
 import { SystemClock } from './infrastructure/clock.js';
@@ -51,6 +54,9 @@ export interface Container {
    * in a test does not open a socket to Shelly.
    */
   gateStateAdapter: ReedSwitchStateAdapter;
+  pushTokens: PushTokenRepositoryPort;
+  /** Built here so server.ts can hand it to the gate-open alarm. */
+  notifyGateOpen: NotifyGateOpenUseCase;
   close(): void;
 }
 
@@ -59,7 +65,7 @@ export interface Container {
  * hand, no DI container -- there are a dozen objects here and a framework
  * would hide the one line that matters (see `gateCommand`).
  */
-export function buildContainer(config: Config): Container {
+export function buildContainer(config: Config, pushSender: PushSenderPort): Container {
   const clock = new SystemClock();
   const db = openDatabase(config.databasePath);
 
@@ -73,6 +79,7 @@ export function buildContainer(config: Config): Container {
   const users = new SqliteUserRepository(db);
   const grants = new SqliteAccessGrantRepository(db);
   const audit = new SqliteAuditLog(db);
+  const pushTokens = new SqlitePushTokenRepository(db);
   const tokens = new JwtTokenService(config.jwtSecret, db, clock);
 
   return {
@@ -104,6 +111,10 @@ export function buildContainer(config: Config): Container {
     gateStateSink: gateState,
     gateStateWebhookToken: config.gateState.webhookToken,
     gateStateAdapter: gateState,
+    pushTokens,
+    notifyGateOpen: new NotifyGateOpenUseCase(
+      pushTokens, users, grants, new RoleBasedAccessPolicy(), pushSender, clock,
+    ),
     close: () => db.close(),
   };
 }

@@ -186,6 +186,27 @@ export async function getAudit(limit = 20): Promise<AuditEvent[] | ApiFailure> {
 }
 
 /**
+ * Hands the backend somewhere to send gate-open alerts, or takes it away.
+ *
+ * Both report success as a boolean rather than a failure object: the caller
+ * only ever needs to know whether to leave the switch on, and there is no
+ * distinct recovery for one kind of failure over another.
+ */
+export async function registerPushToken(token: string): Promise<boolean> {
+  const reply = await authed('/notifications/register', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token }),
+  });
+  return reply?.status === 204;
+}
+
+export async function unregisterPushToken(token: string): Promise<boolean> {
+  const reply = await authed('/notifications/unregister', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token }),
+  });
+  return reply?.status === 204;
+}
+
+/**
  * `fresh` makes the backend take a direct sensor reading before answering,
  * instead of replying from the state the webhook last pushed it.
  *

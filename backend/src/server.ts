@@ -2,6 +2,8 @@ import { buildApp } from './api/app.js';
 import { buildContainer } from './composition-root.js';
 import { loadConfig } from './config.js';
 import { startGateStatePoll } from './infrastructure/shelly/gate-state-poll.js';
+import { startGateOpenAlarm } from './infrastructure/shelly/gate-open-alarm.js';
+import { ExpoPushSender } from './infrastructure/expo-push.js';
 
 /**
  * The webhook token rides in the URL path -- the one place a Shelly can carry
@@ -33,7 +35,10 @@ const scrubUrl = (url: string): string => {
 // Throws before anything opens a socket if a secret is missing or production
 // is not behind https. Failing here is the point: not at 2am.
 const config = loadConfig(process.env);
-const container = buildContainer(config);
+// Built before the app so the logger it wants exists; pino is created by
+// buildApp, so the sender takes a thin logger and gets the real one below.
+const pushLog = { warn: (payload: object, message: string) => app.log.warn(payload, message) };
+const container = buildContainer(config, new ExpoPushSender(pushLog));
 
 const app = buildApp(container, {
   // Never in production: see AppOptions.allowCors.
@@ -67,6 +72,16 @@ const app = buildApp(container, {
 // It corrects drift from webhooks that were never delivered -- they are
 // fire-and-forget, so a missed event is gone for good -- and it is not the
 // liveness path. Do not shorten the interval to compensate for lost webhooks.
+// Watches for the gate being left open. Started here, not in the composition
+// root, for the same reason as the poll: building a container in a test must
+// not start a timer.
+const stopAlarm = startGateOpenAlarm(
+  container.gateStateAdapter,
+  () => container.notifyGateOpen.execute(),
+  { openAlertAfterMs: config.gateState.openAlertAfterMs },
+  app.log,
+);
+
 const stopPoll = startGateStatePoll(
   container.gateStateAdapter,
   config.shelly,
@@ -84,6 +99,7 @@ const stopPoll = startGateStatePoll(
 const shutdown = (signal: string): void => {
   app.log.info({ signal }, 'shutting down');
   stopPoll();
+  stopAlarm();
   void app.close().then(() => {
     container.close();
     process.exit(0);

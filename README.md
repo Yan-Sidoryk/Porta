@@ -1,6 +1,7 @@
-# <img src="docs/logo-rounded.png" alt="" width="24"> Porta
+![Demo](docs/demo.png)
 
-Opens and closes a physical driveway gate from a phone.
+Opens and closes a physical driveway gate from a phone (UPD: and now knows if it
+actually closed!)
 
 This is safety-relevant software. A bug here moves a heavy metal gate in the
 real world, so the whole system is built to be conservative: it never invents
